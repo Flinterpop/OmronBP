@@ -1,5 +1,11 @@
 # OmronBP
 
+[![Release][release-badge]][release-latest] [![License: MIT][license-badge]](LICENSE)
+
+[release-badge]: https://img.shields.io/github/v/release/Flinterpop/OmronBP
+[release-latest]: https://github.com/Flinterpop/OmronBP/releases/latest
+[license-badge]: https://img.shields.io/badge/license-MIT-green
+
 *Last updated: 18 Sep 2026*
 
 Version 0.1.0
@@ -174,6 +180,10 @@ The protocol framing, record and clock decoders, storage and PDF writer are unit
 ## Releasing
 
 The version lives in `pyproject.toml`, `omron_bp/__init__.py`, `win32/CMakeLists.txt`, `win32/src/app.rc` (numeric tuple and string), `win32/src/app.manifest` and the *Version* line at the top of this file; `release.ps1` refuses to build unless they all agree. It then runs the Python checks and tests, builds the C++ app and tests in Release with the static CRT, confirms the exe imports no VC++ runtime DLL and reports the right file version, and writes `dist/OmronBP-v<version>-win64.zip` containing the exe and this README. Tagging is done by hand (`git tag -a v<version>`). Readings, the device registry and any exports are git-ignored: they are personal health data and never belong in the repository.
+
+## License
+
+MIT - see [LICENSE](LICENSE). The wire protocol and per-model memory layouts were learned from the open-source [omblepy](https://github.com/userx14/omblepy) and [UBPM](https://codeberg.org/LazyT/ubpm) projects; this is an independent implementation that stays compatible with their pairing key. OMRON is a trademark of OMRON Healthcare; this project is not affiliated with or endorsed by them.
 
 ## Release notes
 

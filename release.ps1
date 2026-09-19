@@ -61,6 +61,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item $exe $stage
 Copy-Item (Join-Path $root 'README.md') $stage
+Copy-Item (Join-Path $root 'LICENSE') $stage
 $zip = "$stage.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path "$stage\*" -DestinationPath $zip

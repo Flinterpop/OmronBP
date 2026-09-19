@@ -2,6 +2,7 @@
 name = "omron-bp"
 version = "0.1.0"
 description = "Download readings from OMRON Bluetooth blood-pressure monitors"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["bleak>=1.0"]
 
