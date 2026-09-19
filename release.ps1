@@ -32,7 +32,7 @@ Write-Host "Version $version is in lockstep across all files." -ForegroundColor 
 
 # --- 2. Python checks ----------------------------------------------------------------------
 python -m ruff check .;              if ($LASTEXITCODE -ne 0) { throw 'ruff failed' }
-python -m mypy omron_bp tests;       if ($LASTEXITCODE -ne 0) { throw 'mypy failed' }
+python -m mypy omron_bp tests win32/tools; if ($LASTEXITCODE -ne 0) { throw 'mypy failed' }
 python -m pytest -q;                 if ($LASTEXITCODE -ne 0) { throw 'pytest failed' }
 
 # --- 3. C++ build and tests ----------------------------------------------------------------

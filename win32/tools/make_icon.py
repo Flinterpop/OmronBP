@@ -2,8 +2,9 @@
 
 Usage: python make_icon.py <layer dir> <out.ico>
 
-Each entry is a classic DIB icon: BITMAPINFOHEADER (height doubled), bottom-up
-32-bit BGRA pixels, then a 1-bit AND mask derived from the alpha channel.
+Small sizes are classic DIB entries: BITMAPINFOHEADER (height doubled), bottom-up
+32-bit BGRA pixels, then a 1-bit AND mask derived from the alpha channel.  The
+128 and 256 px layers are stored as PNG, which Windows Vista and later accept.
 No third-party libraries.
 """
 
@@ -14,6 +15,7 @@ import sys
 from pathlib import Path
 
 SIZES = (16, 24, 32, 48, 64, 128, 256)
+PNG_FROM = 128  # sizes from here up are stored PNG-compressed
 MAX_LAYERS = 16
 
 
@@ -39,13 +41,11 @@ def dib_entry(width: int, height: int, pixels: bytes) -> bytes:
     mask_stride = ((width + 31) // 32) * 4
     mask = bytearray()
     for row in range(height):  # bottom-up, like the pixels
-        bits = 0
         line = bytearray(mask_stride)
         for x in range(width):
             alpha = pixels[row * stride + x * 4 + 3]
             if alpha < 128:
                 line[x // 8] |= 0x80 >> (x % 8)
-            bits += 1
         mask += line
     header = struct.pack("<IiiHHIIiiII", 40, width, height * 2, 1, 32, 0, stride * height + len(mask), 0, 0, 0, 0)
     return header + pixels + bytes(mask)
@@ -54,6 +54,12 @@ def dib_entry(width: int, height: int, pixels: bytes) -> bytes:
 def main(layer_dir: Path, out: Path) -> None:
     entries: list[tuple[int, bytes]] = []
     for size in SIZES:
+        if size >= PNG_FROM:
+            # Vista and later accept a PNG-compressed entry; it is a quarter of the DIB size.
+            png = (layer_dir / f"icon_{size}.png").read_bytes()
+            assert png[:8] == bytes.fromhex("89504e470d0a1a0a"), "not a PNG"
+            entries.append((size, png))
+            continue
         width, height, pixels = read_bmp32(layer_dir / f"icon_{size}.bmp")
         entries.append((width, dib_entry(width, height, pixels)))
     assert 0 < len(entries) <= MAX_LAYERS
