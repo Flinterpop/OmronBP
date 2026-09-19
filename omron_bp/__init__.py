@@ -9,4 +9,4 @@ EEPROM and are read out as fixed-size records.
 from omron_bp.models import Reading
 
 __all__ = ["Reading"]
-__version__ = "0.1.1"
+__version__ = "0.1.2"

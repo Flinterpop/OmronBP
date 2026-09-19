@@ -6,9 +6,9 @@
 [release-latest]: https://github.com/Flinterpop/OmronBP/releases/latest
 [license-badge]: https://img.shields.io/badge/license-MIT-green
 
-*Last updated: 18 Sep 2026*
+*Last updated: 19 Sep 2026*
 
-Version 0.1.1
+Version 0.1.2
 
 Downloads stored readings from OMRON Bluetooth LE blood-pressure monitors directly to a CSV file, without the OMRON app. Runs on Windows 10/11 using the built-in Bluetooth stack.
 
@@ -186,6 +186,10 @@ The version lives in `pyproject.toml`, `omron_bp/__init__.py`, `win32/CMakeLists
 MIT - see [LICENSE](LICENSE). The wire protocol and per-model memory layouts were learned from the open-source [omblepy](https://github.com/userx14/omblepy) and [UBPM](https://codeberg.org/LazyT/ubpm) projects; this is an independent implementation that stays compatible with their pairing key. OMRON is a trademark of OMRON Healthcare; this project is not affiliated with or endorsed by them.
 
 ## Release notes
+
+### v0.1.2 — 19 Sep 2026
+
+Maintenance release from a rot check and Power of 10 pass: checked Win32 return values, single-level pointers, explicit loop bounds, assertions throughout both code bases, unit tests for the clock-sync decision logic in both languages, stale documentation fixed. No functional change.
 
 ### v0.1.1 — 18 Sep 2026
 
