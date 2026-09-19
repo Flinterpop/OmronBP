@@ -12,3 +12,4 @@ OmronBP.exe
 readings_*.csv
 readings_*.pdf
 dist/
+win32/tools/icon_layers/

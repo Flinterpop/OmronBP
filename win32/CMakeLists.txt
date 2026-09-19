@@ -35,6 +35,7 @@ add_executable(OmronBP WIN32
     src/pair_dialog.cpp
     src/export_dialog.cpp
     src/app.rc
+    src/app.ico
     src/app.manifest
 )
 target_link_libraries(OmronBP PRIVATE omron_core windowsapp comctl32 d2d1 dwrite shell32 shlwapi ole32 uxtheme)

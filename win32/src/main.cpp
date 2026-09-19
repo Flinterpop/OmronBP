@@ -26,6 +26,7 @@
 #include "export_dialog.h"
 #include "pdf.h"
 #include "report.h"
+#include "resource.h"
 #include "models.h"
 #include "pair_dialog.h"
 #include "storage.h"
@@ -151,7 +152,8 @@ void MainWindow::Register(HINSTANCE instance) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = kClassName;
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
     RegisterClassExW(&wc);
 }
 
