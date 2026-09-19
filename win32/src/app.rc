@@ -1,0 +1,60 @@
+#include <windows.h>
+#include "resource.h"
+
+#pragma code_page(65001)
+
+IDD_PAIR DIALOGEX 0, 0, 300, 214
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Pair a monitor"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "1.  Hold the monitor's Bluetooth button until the display shows a blinking P (the Evolv may say ""Pair this device"").\n2.  Pick it from the list when it appears, choose its model and a nickname, then click Pair.", IDC_PAIR_HINT, 10, 8, 280, 30
+    LTEXT           "Monitors in range:", -1, 10, 42, 120, 10
+    LISTBOX         IDC_PAIR_LIST, 10, 54, 280, 60, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Model:", -1, 10, 122, 40, 10
+    COMBOBOX        IDC_PAIR_MODEL, 60, 120, 230, 80, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT           "Nickname:", -1, 10, 142, 40, 10
+    EDITTEXT        IDC_PAIR_NAME, 60, 140, 230, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT           "Scanning ...", IDC_PAIR_STATUS, 10, 162, 280, 20
+    DEFPUSHBUTTON   "Pair", IDOK, 184, 190, 50, 15, WS_DISABLED
+    PUSHBUTTON      "Cancel", IDCANCEL, 240, 190, 50, 15
+END
+
+IDD_EXPORT DIALOGEX 0, 0, 260, 136
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Export readings"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "Which monitors:", -1, 10, 10, 80, 10
+    AUTORADIOBUTTON "Selected monitor", IDC_EXPORT_SELECTED, 90, 9, 160, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "All monitors", IDC_EXPORT_ALL, 90, 23, 160, 10
+    LTEXT           "Period:", -1, 10, 42, 80, 10
+    COMBOBOX        IDC_EXPORT_PERIOD, 90, 40, 160, 100, CBS_DROPDOWNLIST | WS_TABSTOP
+    AUTOCHECKBOX    "Also create a PDF report (summary and table, for your doctor)", IDC_EXPORT_PDF, 10, 62, 240, 10, WS_TABSTOP
+    LTEXT           "", IDC_EXPORT_INFO, 10, 82, 240, 20
+    DEFPUSHBUTTON   "Export...", IDOK, 144, 112, 50, 15
+    PUSHBUTTON      "Cancel", IDCANCEL, 200, 112, 50, 15
+END
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "OMRON blood pressure monitor reader"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "ProductName", "OmronBP"
+            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "OriginalFilename", "OmronBP.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

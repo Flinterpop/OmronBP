@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+readings.csv
+devices.json
+readings.html
+win32/build/
+OmronBP.exe
+readings_*.csv
+readings_*.pdf
+dist/
