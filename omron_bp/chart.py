@@ -72,6 +72,7 @@ def render(csv_path: Path, out_path: Path) -> int:
         "source": csv_path.name,
         "groups": _group(rows),
     }
+    assert TEMPLATE.is_file(), TEMPLATE
     template = TEMPLATE.read_text(encoding="utf-8")
     assert template.count(DATA_MARKER) == 1, "template data marker missing"
     page = template.replace(DATA_MARKER, json.dumps(payload, separators=(",", ":")))

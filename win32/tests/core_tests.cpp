@@ -16,6 +16,7 @@
 #include "../src/report.h"
 #include "../src/protocol.h"
 #include "../src/storage.h"
+#include "../src/workflow.h"
 
 namespace {
 
@@ -146,8 +147,8 @@ void TestModels() {
 
     // Field values: (value, unused) pairs reuse BitRange.first as the value.
     const models::RecordBits sample{{84, 0}, {132 - 25, 0}, {67, 0}, {1, 0}, {0, 0}, {26, 0}, {9, 0}, {18, 0}, {7, 0}, {42, 0}, {15, 0}};
-    size_t count = 0;
-    const models::DeviceLayout* const* layouts = models::AllLayouts(&count);
+    const auto& layouts = models::AllLayouts();
+    const size_t count = layouts.size();
     CHECK(count == 2);
     for (size_t i = 0; i < count; ++i) {
         const std::vector<uint8_t> raw = Encode(*layouts[i], sample);
@@ -329,6 +330,72 @@ void TestPdf() {
     std::filesystem::remove_all(dir);
 }
 
+// In-memory EEPROM standing in for a monitor: the clock logic reads and writes through it.
+class FakeEeprom : public ble::EepromIo {
+public:
+    std::vector<uint8_t> memory = std::vector<uint8_t>(0x1000, 0xFF);
+    int writes = 0;
+    uint16_t last_write_address = 0;
+
+    std::vector<uint8_t> ReadEeprom(uint16_t address, size_t size, size_t) override {
+        return std::vector<uint8_t>(memory.begin() + address, memory.begin() + address + static_cast<long>(size));
+    }
+    void WriteEeprom(uint16_t address, const uint8_t* data, size_t size) override {
+        ++writes;
+        last_write_address = address;
+        std::copy(data, data + size, memory.begin() + address);
+    }
+};
+
+void TestClockWorkflow() {
+    const models::DeviceLayout* ten = models::FindLayout(L"HEM-7342T");
+    CHECK(ten && ten->clock);
+    if (!ten || !ten->clock) return;
+    const models::ClockLayout& clock = *ten->clock;
+    const models::Timestamp now{2026, 9, 18, 21, 34, 26};
+    auto quiet = [](ble::Level, const std::wstring&) {};
+
+    // Record captured live: 20:15:18, valid checksum -> 79 min slow -> corrected when sync is on.
+    const uint8_t live[16] = {0xc8, 0xa8, 0, 0, 0, 0, 0, 0, 0x1a, 0x09, 0x12, 0x14, 0x0f, 0x12, 0xda, 0x00};
+    FakeEeprom io;
+    std::copy(live, live + 16, io.memory.begin() + clock.read_address);
+    workflow::ClockStatus st = workflow::CheckClock(io, *ten, now, true, quiet);
+    CHECK(st.known && st.readable && st.verified && st.corrected);
+    CHECK(st.drift_seconds == -(79 * 60 + 8));
+    CHECK(io.writes == 1 && io.last_write_address == clock.write_address);
+    const auto written = models::ParseClock(clock, io.memory.data() + clock.write_address, clock.size);
+    CHECK(written && written->ToString() == "2026-09-18 21:34:26");
+    CHECK(io.memory[clock.write_address] == 0xc8 && io.memory[clock.write_address + 1] == 0xa8);  // prefix preserved
+
+    // Sync disabled: reported, not written.
+    FakeEeprom io2;
+    std::copy(live, live + 16, io2.memory.begin() + clock.read_address);
+    st = workflow::CheckClock(io2, *ten, now, false, quiet);
+    CHECK(st.verified && !st.corrected && io2.writes == 0);
+
+    // Bad checksum: never written even with sync on.
+    FakeEeprom io3;
+    std::copy(live, live + 16, io3.memory.begin() + clock.read_address);
+    io3.memory[clock.read_address + clock.checksum_offset] ^= 0x01;
+    st = workflow::CheckClock(io3, *ten, now, true, quiet);
+    CHECK(st.readable && !st.verified && !st.corrected && io3.writes == 0);
+
+    // Within tolerance: nothing written.
+    FakeEeprom io4;
+    uint8_t close[16];
+    models::EncodeClock(clock, live, 16, models::Timestamp{2026, 9, 18, 21, 34, 10}, close);
+    std::copy(close, close + 16, io4.memory.begin() + clock.read_address);
+    st = workflow::CheckClock(io4, *ten, now, true, quiet);
+    CHECK(st.verified && !st.corrected && st.drift_seconds == -16 && io4.writes == 0);
+
+    // Unreadable date: reported as such, no write.
+    FakeEeprom io5;
+    std::copy(live, live + 16, io5.memory.begin() + clock.read_address);
+    io5.memory[clock.read_address + clock.month] = 13;
+    st = workflow::CheckClock(io5, *ten, now, true, quiet);
+    CHECK(st.known && !st.readable && !st.corrected && io5.writes == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -341,6 +408,8 @@ int main() {
     std::puts("storage ok");
     TestPdf();
     std::puts("pdf ok");
+    TestClockWorkflow();
+    std::puts("clock workflow ok");
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

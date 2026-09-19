@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <ctime>
 #include <string>
 
 namespace omron::chart {
@@ -45,6 +44,8 @@ Civil CivilFromEpoch(int64_t epoch) {
     const unsigned mp = (5 * doy + 2) / 153;
     const unsigned d = doy - (153 * mp + 2) / 5 + 1;
     const unsigned m = mp < 10 ? mp + 3 : mp - 9;
+    assert(m >= 1 && m <= 12 && d >= 1 && d <= 31);
+    assert(y > 1900 && y < 2200);
     return {static_cast<int>(y + (m <= 2 ? 1 : 0)), static_cast<int>(m), static_cast<int>(d)};
 }
 
@@ -156,6 +157,7 @@ void ChartWindow::ComputeVisible() {
 }
 
 bool ChartWindow::EnsureTarget() {
+    assert(hwnd_ != nullptr);
     if (!factory_) {
         if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.put()))) return false;
         if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dwrite_.put())))) return false;
@@ -177,6 +179,7 @@ bool ChartWindow::EnsureTarget() {
     props.dpiX = props.dpiY = static_cast<float>(dpi);
     const D2D1_HWND_RENDER_TARGET_PROPERTIES hprops = D2D1::HwndRenderTargetProperties(hwnd_, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top));
     if (FAILED(factory_->CreateHwndRenderTarget(props, hprops, target_.put()))) return false;
+    assert(dpi >= 96);
     target_->CreateSolidColorBrush(kInk, brush_.put());
     return brush_ != nullptr;
 }
@@ -206,9 +209,11 @@ void ChartWindow::DrawLegend(const Panel& p, const Series* series, size_t count)
 }
 
 void ChartWindow::DrawXAxis(const Panel& p) {
+    assert(p.t1 > p.t0 && p.plot.right > p.plot.left);
     brush_->SetColor(kAxis);
     target_->DrawLine(D2D1::Point2F(p.plot.left, p.plot.bottom), D2D1::Point2F(p.plot.right, p.plot.bottom), brush_.get(), 1.0f);
     const int64_t days = (p.t1 - p.t0) / kDay;
+    assert(days >= 0);
     const Civil start = CivilFromEpoch(p.t0);
     int drawn = 0;
     if (days > 800) {
@@ -247,6 +252,8 @@ void ChartWindow::DrawXAxis(const Panel& p) {
 }
 
 void ChartWindow::DrawPanel(const Panel& p, const wchar_t* title, const Series* series, size_t count, bool refs) {
+    assert(series != nullptr && count > 0 && count <= 2 && p.ymax > p.ymin);
+    assert(!visible_.empty());
     Text(title, p.plot.left, p.plot.top - 12, title_.get(), kInk2);
     const int target = std::clamp(static_cast<int>((p.plot.bottom - p.plot.top) / 36.0f), 2, 6);
     const float step = NiceStep(p.ymax - p.ymin, target);
@@ -287,9 +294,11 @@ void ChartWindow::DrawPanel(const Panel& p, const wchar_t* title, const Series* 
 }
 
 void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
+    assert(bp.t0 == pulse.t0 && bp.t1 == pulse.t1);
     if (hover_ < 0 || hover_ >= static_cast<int>(visible_.size())) return;
     const Point& pt = visible_[static_cast<size_t>(hover_)];
     const float x = bp.X(pt.epoch);
+    assert(x >= bp.plot.left - 1 && x <= bp.plot.right + 1);
     brush_->SetColor(kInk2);
     target_->DrawLine(D2D1::Point2F(x, bp.plot.top), D2D1::Point2F(x, pulse.plot.bottom), brush_.get(), 1.0f);
     const D2D1_COLOR_F colors[3] = {kSys, kDia, kPulse};
@@ -315,7 +324,9 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
 
 void ChartWindow::OnPaint() {
     PAINTSTRUCT ps;
-    BeginPaint(hwnd_, &ps);
+    const HDC dc = BeginPaint(hwnd_, &ps);
+    assert(dc != nullptr);
+    (void)dc;
     if (EnsureTarget()) {
         target_->BeginDraw();
         target_->Clear(kSurface);
@@ -344,7 +355,9 @@ void ChartWindow::OnPaint() {
         }
         if (target_->EndDraw() == D2DERR_RECREATE_TARGET) target_ = nullptr;
     }
-    EndPaint(hwnd_, &ps);
+    const BOOL ended = EndPaint(hwnd_, &ps);
+    assert(ended);
+    (void)ended;
 }
 
 void ChartWindow::OnSize() {
@@ -365,6 +378,7 @@ void ChartWindow::OnMouseMove(int x, int y) {
     (void)y;
     if (visible_.empty() || !target_) return;
     const float dpi = static_cast<float>(GetDpiForWindow(hwnd_));
+    assert(dpi > 0 && visible_.size() <= all_.size());
     const float px = static_cast<float>(x) * 96.0f / dpi;
     int best = -1;
     float best_d = 20.0f;
@@ -372,6 +386,7 @@ void ChartWindow::OnMouseMove(int x, int y) {
         const float d = std::fabs(bp_.X(visible_[i].epoch) - px);
         if (d < best_d) best_d = d, best = static_cast<int>(i);
     }
+    assert(best == -1 || best < static_cast<int>(visible_.size()));
     if (best != hover_) {
         hover_ = best;
         InvalidateRect(hwnd_, nullptr, FALSE);

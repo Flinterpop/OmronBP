@@ -20,8 +20,8 @@ add_library(omron_core STATIC
 )
 target_include_directories(omron_core PUBLIC src)
 
-add_executable(core_tests tests/core_tests.cpp)
-target_link_libraries(core_tests PRIVATE omron_core)
+add_executable(core_tests tests/core_tests.cpp src/workflow.cpp src/ble.cpp)
+target_link_libraries(core_tests PRIVATE omron_core windowsapp)
 enable_testing()
 add_test(NAME core_tests COMMAND core_tests)
 

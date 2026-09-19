@@ -61,6 +61,7 @@ async def ensure_bonded(client: BleakClient) -> None:
     """
     if sys.platform != "win32":
         return
+    assert client.is_connected, "bond after connecting"
     for _ in range(BOND_SETTLE_ATTEMPTS):
         if await is_bonded(client):
             return
@@ -83,6 +84,7 @@ async def ensure_bonded(client: BleakClient) -> None:
 
 async def release(address: str) -> bool:
     """Forget the Windows bond for ``address``.  Returns True if one was removed."""
+    assert address, "address required"
     if sys.platform != "win32":
         return False
     from winrt.windows.devices.bluetooth import BluetoothLEDevice  # noqa: PLC0415
@@ -95,6 +97,7 @@ async def release(address: str) -> bool:
     if not info.pairing.is_paired:
         return False
     result = await info.pairing.unpair_async()
+    assert result is not None
     log.info("released bond with %s (status %s)", address, result.status)
     return True
 

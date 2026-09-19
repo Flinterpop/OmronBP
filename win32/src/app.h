@@ -28,6 +28,7 @@ public:
 
     void Push(ble::Level level, const std::wstring& text);
     bool Pop(Entry& out);
+    size_t TakeDropped();  // lines discarded because the ring was full, since the last call
 
 private:
     static constexpr size_t kCapacity = 256;

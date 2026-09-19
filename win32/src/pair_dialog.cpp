@@ -3,7 +3,6 @@
 #include <windowsx.h>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <memory>
 #include <mutex>
@@ -42,6 +41,7 @@ State* Self(HWND dlg) {
 }
 
 void OnFound(HWND dlg, State& s, const ble::FoundDevice& dev) {
+    assert(dlg != nullptr && dev.address != 0);
     if (!ble::IsOmronName(dev.name)) return;
     bool changed = false;
     {
@@ -56,11 +56,17 @@ void OnFound(HWND dlg, State& s, const ble::FoundDevice& dev) {
             changed = true;
         }
     }
-    if (changed) PostMessageW(dlg, app::WM_APP_FOUND, 0, 0);
+    if (changed) {
+        const BOOL posted = PostMessageW(dlg, app::WM_APP_FOUND, 0, 0);
+        assert(posted);
+        (void)posted;
+    }
 }
 
 void RefreshList(HWND dlg, State& s) {
     HWND list = GetDlgItem(dlg, IDC_PAIR_LIST);
+    assert(list != nullptr);
+    assert(s.found.size() <= kMaxFound);
     const int selected = ListBox_GetCurSel(list);
     ListBox_ResetContent(list);
     std::lock_guard<std::mutex> lock(s.mutex);
@@ -74,6 +80,7 @@ void RefreshList(HWND dlg, State& s) {
 }
 
 bool Collect(HWND dlg, State& s) {
+    assert(dlg != nullptr && s.taken != nullptr);
     const int sel = ListBox_GetCurSel(GetDlgItem(dlg, IDC_PAIR_LIST));
     const int model = ComboBox_GetCurSel(GetDlgItem(dlg, IDC_PAIR_MODEL));
     wchar_t name[kMaxName + 1] = {};
@@ -105,6 +112,7 @@ bool Collect(HWND dlg, State& s) {
     }
     r.name = nick;
     r.model = s.layouts[static_cast<size_t>(model)]->model;
+    assert(r.address != 0 && !r.model.empty());
     s.result = r;
     return true;
 }
@@ -114,13 +122,13 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_INITDIALOG: {
             auto* s = reinterpret_cast<State*>(lp);
             SetWindowLongPtrW(dlg, DWLP_USER, reinterpret_cast<LONG_PTR>(s));
-            size_t count = 0;
-            const models::DeviceLayout* const* layouts = models::AllLayouts(&count);
             HWND combo = GetDlgItem(dlg, IDC_PAIR_MODEL);
-            for (size_t i = 0; i < count; ++i) {
-                s->layouts.push_back(layouts[i]);
-                ComboBox_AddString(combo, (std::wstring(layouts[i]->retail) + L"  -  " + layouts[i]->model).c_str());
+            assert(combo != nullptr);
+            for (const models::DeviceLayout* layout : models::AllLayouts()) {
+                s->layouts.push_back(layout);
+                ComboBox_AddString(combo, (std::wstring(layout->retail) + L"  -  " + layout->model).c_str());
             }
+            assert(s->layouts.size() == models::kLayoutCount);
             ComboBox_SetCurSel(combo, 0);
             Edit_LimitText(GetDlgItem(dlg, IDC_PAIR_NAME), kMaxName);
             s->scanner = std::make_unique<ble::Scanner>([dlg, s](const ble::FoundDevice& dev) { OnFound(dlg, *s, dev); });

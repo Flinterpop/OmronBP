@@ -70,8 +70,17 @@ private:
 // Forget the Windows bond for a monitor.  Returns true if one was removed.
 bool ReleaseBond(uint64_t address, const LogFn& log);
 
+// The EEPROM operations the clock logic needs; Monitor implements them over Bluetooth,
+// tests implement them over a byte array.
+class EepromIo {
+public:
+    virtual ~EepromIo() = default;
+    virtual std::vector<uint8_t> ReadEeprom(uint16_t address, size_t size, size_t block_size) = 0;
+    virtual void WriteEeprom(uint16_t address, const uint8_t* data, size_t size) = 0;
+};
+
 // One connection to a monitor.
-class Monitor {
+class Monitor : public EepromIo {
 public:
     Monitor(uint64_t address, LogFn log);  // connects and resolves the OMRON service
     ~Monitor();
@@ -85,8 +94,8 @@ public:
     void ProgramKey(const std::array<uint8_t, protocol::kKeySize>& key);  // monitor must be in pairing mode
     void StartSession();
     void EndSession();
-    std::vector<uint8_t> ReadEeprom(uint16_t address, size_t size, size_t block_size);
-    void WriteEeprom(uint16_t address, const uint8_t* data, size_t size);  // one block, at most 0x38 bytes
+    std::vector<uint8_t> ReadEeprom(uint16_t address, size_t size, size_t block_size) override;
+    void WriteEeprom(uint16_t address, const uint8_t* data, size_t size) override;  // one block, at most 0x38 bytes
 
 private:
     using Characteristic = winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattCharacteristic;

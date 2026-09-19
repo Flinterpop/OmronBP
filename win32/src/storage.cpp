@@ -17,7 +17,10 @@ namespace {
 constexpr const char* kHeader = "timestamp,model,device,user,systolic,diastolic,pulse,movement,irregular_heartbeat";
 constexpr size_t kColumns = 9;
 
+constexpr size_t kMaxLineChars = 4096;
+
 std::vector<std::string> SplitCsvLine(const std::string& line) {
+    assert(line.size() <= kMaxLineChars);
     std::vector<std::string> fields;
     std::string current;
     for (char c : line) {
@@ -29,6 +32,7 @@ std::vector<std::string> SplitCsvLine(const std::string& line) {
         }
     }
     fields.push_back(current);
+    assert(!fields.empty());
     return fields;
 }
 
@@ -58,6 +62,7 @@ public:
     explicit JsonReader(const std::string& text) : text_(text) {}
 
     std::vector<KnownDevice> ReadDevices() {
+        assert(pos_ == 0);
         std::vector<KnownDevice> devices;
         SkipSpace();
         Expect('{');
@@ -71,6 +76,7 @@ public:
             ReadEntry(device);
             if (device.model.empty() || device.address.empty()) throw std::runtime_error("devices.json entry incomplete");
             devices.push_back(device);
+            assert(devices.size() <= kMaxDevices + 1);
             SkipSpace();
             if (Peek() == ',') {
                 ++pos_;
@@ -85,6 +91,7 @@ public:
 
 private:
     void ReadEntry(KnownDevice& device) {
+        assert(!device.name.empty());
         SkipSpace();
         Expect('{');
         for (size_t fields = 0; fields < 8; ++fields) {
@@ -94,6 +101,7 @@ private:
             Expect(':');
             SkipSpace();
             const std::string value = ReadString();
+            assert(!key.empty());
             if (key == "model") device.model = FromUtf8(value);
             if (key == "address") device.address = FromUtf8(value);
             SkipSpace();
@@ -109,7 +117,9 @@ private:
 
     char Peek() const { return pos_ < text_.size() ? text_[pos_] : '\0'; }
     void SkipSpace() {
-        while (pos_ < text_.size() && (text_[pos_] == ' ' || text_[pos_] == '\n' || text_[pos_] == '\r' || text_[pos_] == '\t')) ++pos_;
+        const size_t limit = text_.size();  // loop bound: at most one step per remaining character
+        while (pos_ < limit && (text_[pos_] == ' ' || text_[pos_] == '\n' || text_[pos_] == '\r' || text_[pos_] == '\t')) ++pos_;
+        assert(pos_ <= limit);
     }
     void Expect(char c) {
         if (Peek() != c) throw std::runtime_error(std::string("devices.json: expected '") + c + "'");
@@ -118,11 +128,13 @@ private:
     std::string ReadString() {
         Expect('"');
         std::string out;
-        while (pos_ < text_.size() && text_[pos_] != '"') {
+        const size_t limit = text_.size();  // loop bound: at most one step per remaining character
+        while (pos_ < limit && text_[pos_] != '"') {
             if (text_[pos_] == '\\' && pos_ + 1 < text_.size()) ++pos_;  // keep the escaped char literally
             out.push_back(text_[pos_++]);
         }
         Expect('"');
+        assert(out.size() < kMaxLineChars);
         return out;
     }
 
@@ -143,16 +155,22 @@ std::string ReadWholeFile(const std::filesystem::path& path) {
 std::string ToUtf8(const std::wstring& text) {
     if (text.empty()) return {};
     const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) throw std::runtime_error("text cannot be converted to UTF-8");
     std::string out(static_cast<size_t>(size), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
+    const int written = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
+    assert(written == size);
+    if (written != size) throw std::runtime_error("UTF-8 conversion failed");
     return out;
 }
 
 std::wstring FromUtf8(const std::string& text) {
     if (text.empty()) return {};
     const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0) throw std::runtime_error("text is not valid UTF-8");
     std::wstring out(static_cast<size_t>(size), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size);
+    const int written = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size);
+    assert(written == size);
+    if (written != size) throw std::runtime_error("UTF-8 conversion failed");
     return out;
 }
 
@@ -164,6 +182,7 @@ std::wstring FormatAddress(uint64_t address) {
 }
 
 uint64_t ParseAddress(const std::wstring& text) {
+    assert(text.size() <= 17);
     uint64_t value = 0;
     int digits = 0;
     for (wchar_t c : text) {
@@ -176,6 +195,7 @@ uint64_t ParseAddress(const std::wstring& text) {
         value = (value << 4) | static_cast<uint64_t>(nibble);
         ++digits;
     }
+    assert(value <= 0xFFFFFFFFFFFFull);
     return digits == 12 ? value : 0;
 }
 
@@ -184,6 +204,7 @@ uint64_t KnownDevice::AddressValue() const {
 }
 
 std::vector<StoredReading> LoadReadings(const std::filesystem::path& csv) {
+    assert(!csv.empty());
     std::vector<StoredReading> rows;
     if (!std::filesystem::exists(csv)) return rows;
     std::ifstream in(csv);
@@ -213,6 +234,7 @@ std::vector<StoredReading> LoadReadings(const std::filesystem::path& csv) {
         row.epoch = when->ToEpoch();
         rows.push_back(row);
     }
+    assert(rows.size() <= kMaxRows);
     return rows;
 }
 
@@ -276,14 +298,18 @@ models::Timestamp LocalNow() {
 }
 
 std::vector<KnownDevice> LoadDevices(const std::filesystem::path& json) {
+    assert(!json.empty());
     if (!std::filesystem::exists(json)) return {};
     const std::string text = ReadWholeFile(json);
     JsonReader reader(text);
-    return reader.ReadDevices();
+    std::vector<KnownDevice> devices = reader.ReadDevices();
+    assert(devices.size() <= kMaxDevices);
+    return devices;
 }
 
 void SaveDevices(const std::filesystem::path& json, const std::vector<KnownDevice>& devices) {
     assert(devices.size() <= kMaxDevices);
+    assert(!json.empty());
     std::ofstream out(json, std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("cannot write " + json.string());
     out << "{\n";

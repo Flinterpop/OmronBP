@@ -67,13 +67,13 @@ class _Content:
     def __init__(self) -> None:
         self.ops: list[str] = []
 
-    def text(self, text: str, x: float, y: float, size: float, bold: bool = False, gray: float = 0.0) -> None:  # noqa: PLR0913
+    def text(self, text: str, x: float, y: float, size: float, *, bold: bool = False, gray: float = 0.0) -> None:
         self.ops.append(f"{gray:.2f} g BT /{'F2' if bold else 'F1'} {size:.2f} Tf {x:.2f} {y:.2f} Td {_literal(text)} Tj ET")
 
-    def text_right(self, text: str, right: float, y: float, size: float, bold: bool = False, gray: float = 0.0) -> None:  # noqa: PLR0913
-        self.text(text, right - text_width(text, size, bold), y, size, bold, gray)
+    def text_right(self, text: str, right: float, y: float, size: float, *, bold: bool = False, gray: float = 0.0) -> None:
+        self.text(text, right - text_width(text, size, bold), y, size, bold=bold, gray=gray)
 
-    def line(self, x1: float, y1: float, x2: float, y2: float, width: float, gray: float) -> None:  # noqa: PLR0913
+    def line(self, x1: float, y1: float, x2: float, y2: float, *, width: float, gray: float) -> None:
         self.ops.append(f"{gray:.2f} G {width:.2f} w {x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S")
 
     def box(self, x: float, y: float, w: float, h: float, gray: float) -> None:
@@ -84,6 +84,7 @@ class _Content:
 
 
 def _draw_header(c: _Content, r: Report) -> float:
+    assert r.title and len(r.summary) <= 8
     y = PAGE_H - MARGIN
     c.text(r.title, MARGIN, y - TITLE_SIZE, TITLE_SIZE, bold=True)
     y -= TITLE_SIZE + 10
@@ -99,6 +100,7 @@ def _draw_header(c: _Content, r: Report) -> float:
             c.text(line, MARGIN + 8, ty - BODY_SIZE, BODY_SIZE)
             ty -= LINE_H
         y -= box_h + 10
+    assert y > MARGIN
     return y
 
 
@@ -108,12 +110,12 @@ def _draw_table_header(c: _Content, r: Report, y: float) -> float:
             c.text_right(col.label, col.x, y - TABLE_SIZE, TABLE_SIZE, bold=True)
         else:
             c.text(col.label, col.x, y - TABLE_SIZE, TABLE_SIZE, bold=True)
-    c.line(MARGIN, y - ROW_H + 1, PAGE_W - MARGIN, y - ROW_H + 1, 0.75, 0.6)
+    c.line(MARGIN, y - ROW_H + 1, PAGE_W - MARGIN, y - ROW_H + 1, width=0.75, gray=0.6)
     return y - ROW_H - 2
 
 
 def _draw_footer(c: _Content, r: Report, page: int, pages: int) -> None:
-    c.line(MARGIN, MARGIN - 8, PAGE_W - MARGIN, MARGIN - 8, 0.5, 0.75)
+    c.line(MARGIN, MARGIN - 8, PAGE_W - MARGIN, MARGIN - 8, width=0.5, gray=0.75)
     c.text(r.footer, MARGIN, MARGIN - 20, SMALL_SIZE, gray=0.45)
     c.text_right(f"Page {page} of {pages}", PAGE_W - MARGIN, MARGIN - 20, SMALL_SIZE, gray=0.45)
 
@@ -124,6 +126,7 @@ def _rows_that_fit(y: float) -> int:
 
 
 def _page_count(r: Report) -> int:
+    assert len(r.rows) <= MAX_ROWS
     probe = _Content()
     fit = _rows_that_fit(_draw_table_header(probe, r, _draw_header(probe, r)))
     remaining, pages = len(r.rows), 1
@@ -209,6 +212,7 @@ class ReportOptions:
 
 
 def _summary(rows: list[dict[str, str]]) -> list[str]:
+    assert 0 < len(rows) <= MAX_ROWS
     sys_ = [int(r["systolic"]) for r in rows]
     dia = [int(r["diastolic"]) for r in rows]
     pulse = [int(r["pulse"]) for r in rows]
@@ -216,6 +220,7 @@ def _summary(rows: list[dict[str, str]]) -> list[str]:
     irregular = sum(int(r["irregular_heartbeat"]) for r in rows)
     movement = sum(int(r["movement"]) for r in rows)
     n = len(rows)
+    assert high <= n
     flags = f"{high} of {n} readings at or above 140/90"
     if irregular:
         flags += f"   -   {irregular} flagged irregular heartbeat"
@@ -247,6 +252,7 @@ def build_report(rows: list[dict[str, str]], options: ReportOptions) -> Report:
             cells.append(r["device"] + (f" (user {r['user']})" if r["user"] != "1" else ""))
         cells += [r["systolic"], r["diastolic"], r["pulse"], notes]
         table.append(cells)
+    assert len(table) == len(rows)
     return Report(
         title="Blood pressure readings",
         subtitle=[

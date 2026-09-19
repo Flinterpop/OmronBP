@@ -178,6 +178,7 @@ Monitor::~Monitor() {
 }
 
 void Monitor::ResolveCharacteristics() {
+    assert(service_ != nullptr);
     auto find = [this](const guid& uuid) -> Characteristic {
         const GattCharacteristicsResult result = service_.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode::Uncached).get();
         if (result.Status() != GattCommunicationStatus::Success || result.Characteristics().Size() == 0) {
@@ -190,14 +191,17 @@ void Monitor::ResolveCharacteristics() {
         tx_[i] = find(kTxUuids[i]);
     }
     unlock_ = find(kUnlockUuid);
+    assert(rx_[0] != nullptr && tx_[0] != nullptr && unlock_ != nullptr);
 }
 
 void Monitor::OnRx(size_t channel, const uint8_t* data, size_t size) {
+    assert(channel < protocol::kChannelCount && data != nullptr && size <= protocol::kChannelWidth + 4);
     std::lock_guard<std::mutex> lock(mutex_);
     log_(Level::Debug, L"rx ch" + std::to_wstring(channel) + L" < " + Hex(data, size));
     try {
         std::optional<protocol::Packet> packet = assembler_.Push(channel, data, size);
         if (packet) {
+            assert(packet->raw.size >= protocol::kHeaderSize + protocol::kTrailerSize);
             reply_ = packet;
             cv_.notify_all();
         }
@@ -207,6 +211,7 @@ void Monitor::OnRx(size_t channel, const uint8_t* data, size_t size) {
 }
 
 void Monitor::OnUnlock(const uint8_t* data, size_t size) {
+    assert(data != nullptr && size > 0);
     std::lock_guard<std::mutex> lock(mutex_);
     log_(Level::Debug, L"rx unlock < " + Hex(data, size));
     std::array<uint8_t, 20> reply{};
@@ -216,6 +221,7 @@ void Monitor::OnUnlock(const uint8_t* data, size_t size) {
 }
 
 void Monitor::EnableNotifications() {
+    assert(unlock_ != nullptr);
     if (rx_revokers_[0]) return;
     for (size_t i = 0; i < protocol::kChannelCount; ++i) {
         rx_revokers_[i] = rx_[i].ValueChanged(auto_revoke, [this, i](const Characteristic&, const GattValueChangedEventArgs& args) {
@@ -228,6 +234,7 @@ void Monitor::EnableNotifications() {
             throw BleError("cannot enable notifications on channel " + std::to_string(i));
         }
     }
+    assert(rx_revokers_[protocol::kChannelCount - 1]);
     unlock_revoker_ = unlock_.ValueChanged(auto_revoke, [this](const Characteristic&, const GattValueChangedEventArgs& args) {
         const IBuffer buffer = args.CharacteristicValue();
         OnUnlock(buffer.data(), buffer.Length());
@@ -244,6 +251,7 @@ bool Monitor::IsBonded() {
 }
 
 void Monitor::EnsureBonded() {
+    assert(device_ != nullptr);
     // The monitor may start a bond itself right after connecting; asking at the same moment
     // fails with OperationAlreadyInProgress, so let that settle and retry.
     for (int i = 0; i < kBondSettleAttempts; ++i) {
@@ -251,6 +259,7 @@ void Monitor::EnsureBonded() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     DeviceInformation info = FreshDeviceInformation(device_);
+    assert(info != nullptr);
     DeviceInformationCustomPairing custom = info.Pairing().Custom();
     auto revoker = custom.PairingRequested(auto_revoke, [](const DeviceInformationCustomPairing&, const DevicePairingRequestedEventArgs& args) {
         args.Accept();
@@ -273,6 +282,7 @@ void Monitor::EnsureBonded() {
 }
 
 std::array<uint8_t, 20> Monitor::UnlockExchange(uint8_t op, const std::array<uint8_t, protocol::kKeySize>& key) {
+    assert(op <= protocol::kUnlockOpEnterPairing && unlock_ != nullptr);
     std::array<uint8_t, 1 + protocol::kKeySize> packet{};
     packet[0] = op;
     for (size_t i = 0; i < protocol::kKeySize; ++i) packet[1 + i] = key[i];
@@ -288,6 +298,7 @@ std::array<uint8_t, 20> Monitor::UnlockExchange(uint8_t op, const std::array<uin
     if (!cv_.wait_for(lock, kUnlockTimeout, [this] { return unlock_reply_.has_value(); })) {
         throw BleError("no reply on the unlock channel");
     }
+    assert(unlock_reply_.has_value());
     return *unlock_reply_;
 }
 
@@ -300,8 +311,9 @@ void Monitor::Unlock(const std::array<uint8_t, protocol::kKeySize>& key) {
 }
 
 void Monitor::ProgramKey(const std::array<uint8_t, protocol::kKeySize>& key) {
+    const std::array<uint8_t, protocol::kKeySize> zero{};  // all-zero key = "enter pairing mode"
+    assert(key != zero);
     EnableNotifications();
-    std::array<uint8_t, protocol::kKeySize> zero{};
     bool entered = false;
     for (int attempt = 1; attempt <= kPairingAttempts; ++attempt) {
         const std::array<uint8_t, 20> reply = UnlockExchange(protocol::kUnlockOpEnterPairing, zero);
@@ -315,6 +327,7 @@ void Monitor::ProgramKey(const std::array<uint8_t, protocol::kKeySize>& key) {
     if (!entered) {
         throw BleError("the monitor did not enter key-programming mode - is it showing the blinking P?");
     }
+    assert(entered);
     const std::array<uint8_t, 20> reply = UnlockExchange(protocol::kUnlockOpStoreKey, key);
     if (reply[0] != protocol::kUnlockRspKeyStored || reply[1] != 0) {
         throw BleError("the monitor refused the new key");
@@ -325,6 +338,7 @@ void Monitor::ProgramKey(const std::array<uint8_t, protocol::kKeySize>& key) {
 void Monitor::WriteChunks(const protocol::Bytes& command) {
     assert(command.size > 0 && command.size <= protocol::kMaxPacket);
     const size_t chunks = (command.size + protocol::kChannelWidth - 1) / protocol::kChannelWidth;
+    assert(chunks >= 1 && chunks <= protocol::kChannelCount);
     for (size_t i = 0; i < chunks; ++i) {
         const size_t offset = i * protocol::kChannelWidth;
         const size_t size = std::min(protocol::kChannelWidth, command.size - offset);
@@ -337,6 +351,7 @@ void Monitor::WriteChunks(const protocol::Bytes& command) {
 }
 
 protocol::Packet Monitor::Send(const protocol::Bytes& command) {
+    assert(command.size >= protocol::kHeaderSize + protocol::kTrailerSize && rx_revokers_[0]);
     for (int attempt = 1; attempt <= kMaxRetries; ++attempt) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -346,6 +361,7 @@ protocol::Packet Monitor::Send(const protocol::Bytes& command) {
         WriteChunks(command);
         std::unique_lock<std::mutex> lock(mutex_);
         if (cv_.wait_for(lock, kReplyTimeout, [this] { return reply_.has_value(); })) {
+            assert(reply_.has_value());
             return *reply_;
         }
         log_(Level::Debug, L"no reply (attempt " + std::to_wstring(attempt) + L"/" + std::to_wstring(kMaxRetries) + L")");
@@ -373,6 +389,7 @@ void Monitor::EndSession() {
 }
 
 std::vector<uint8_t> Monitor::ReadBlock(uint16_t address, uint8_t size) {
+    assert(size > 0 && size <= protocol::kMaxReadSize);
     const protocol::Packet reply = Send(protocol::BuildReadCommand(address, size));
     if (reply.kind != protocol::kRspRead) throw BleError("unexpected reply to read");
     if (reply.address != address) throw BleError("reply for the wrong address");
@@ -381,6 +398,7 @@ std::vector<uint8_t> Monitor::ReadBlock(uint16_t address, uint8_t size) {
         return std::vector<uint8_t>(size, 0xFF);
     }
     if (reply.DataSize() != size) throw BleError("reply carried the wrong number of bytes");
+    assert(reply.DataSize() == size);
     return std::vector<uint8_t>(reply.Data(), reply.Data() + size);
 }
 

@@ -30,6 +30,9 @@ ignore = [
     "PLR2004", # magic values in tests / bit positions
 ]
 
+[tool.ruff.lint.pylint]
+max-args = 7  # drawing primitives take coordinates, size and colour
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ANN", "PLR"]
 

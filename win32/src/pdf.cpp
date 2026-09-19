@@ -94,6 +94,7 @@ public:
     }
 
     void Finish() {
+        assert(!pages_.empty() && offsets_.size() == 5 + 2 * pages_.size());
         // Fixed objects are written last; their numbers were reserved up front.
         offsets_[1] = Tell();
         Emit("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
@@ -107,6 +108,7 @@ public:
         Emit("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n");
 
         const size_t xref = Tell();
+        assert(xref > offsets_[4]);
         Emit("xref\n0 " + std::to_string(offsets_.size()) + "\n0000000000 65535 f \n");
         for (size_t i = 1; i < offsets_.size(); ++i) {
             char line[24];
@@ -140,6 +142,7 @@ private:
 
 // Draws title/subtitle/summary; returns the y where the table may start.
 float DrawHeader(Content& c, const Report& r) {
+    assert(!r.title.empty() && r.summary.size() <= 8);
     float y = kPageH - kMargin;
     c.Text(r.title, kMargin, y - kTitleSize, kTitleSize, true);
     y -= kTitleSize + 10;
@@ -158,6 +161,7 @@ float DrawHeader(Content& c, const Report& r) {
         }
         y -= box_h + 10;
     }
+    assert(y > kMargin);
     return y;
 }
 

@@ -20,8 +20,6 @@ struct Paths {
     std::filesystem::path devices;
 };
 
-// Waits (up to `timeout`) for the monitor to advertise, then connects.  Retries a
-// dropped connection a few times.  Throws ble::NotFound if it never advertises.
 struct ClockStatus {
     bool known = false;      // the model has a clock layout
     bool readable = false;   // the record decoded to a valid date
@@ -38,6 +36,10 @@ struct DownloadResult {
 };
 
 constexpr long kClockToleranceSeconds = 30;
+
+// Reads the clock record, reports the drift and, when `sync` is set and the record checksum
+// verified the layout, writes `now` into it.  Pure apart from the EEPROM I/O, so it is unit-tested.
+ClockStatus CheckClock(ble::EepromIo& io, const models::DeviceLayout& layout, const models::Timestamp& now, bool sync, const Log& log);
 
 // Program the pairing key into a monitor that is in pairing mode, bonding it to
 // Windows first (releasing `others`, since Windows holds one OMRON bond at a time).

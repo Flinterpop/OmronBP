@@ -33,6 +33,7 @@ std::wstring Summary(const std::vector<storage::StoredReading>& rows) {
         p_lo = std::min(p_lo, m.pulse), p_hi = std::max(p_hi, m.pulse);
     }
     const long n = static_cast<long>(rows.size());
+    assert(sys_lo <= sys_hi && dia_lo <= dia_hi && p_lo <= p_hi);
     std::wstring text = L"Average " + std::to_wstring(sys / n) + L"/" + std::to_wstring(dia / n) + L" mmHg   (systolic " + std::to_wstring(sys_lo) + L"-" +
                         std::to_wstring(sys_hi) + L", diastolic " + std::to_wstring(dia_lo) + L"-" + std::to_wstring(dia_hi) + L")   pulse " +
                         std::to_wstring(pulse / n) + L" bpm (" + std::to_wstring(p_lo) + L"-" + std::to_wstring(p_hi) + L")";
@@ -40,12 +41,14 @@ std::wstring Summary(const std::vector<storage::StoredReading>& rows) {
 }
 
 std::wstring Flags(const std::vector<storage::StoredReading>& rows) {
+    assert(!rows.empty() && rows.size() <= pdf::kMaxRows);
     int high = 0, irregular = 0, movement = 0;
     for (const storage::StoredReading& r : rows) {
         if (r.reading.systolic >= kSysHigh || r.reading.diastolic >= kDiaHigh) ++high;
         if (r.reading.irregular_heartbeat) ++irregular;
         if (r.reading.movement) ++movement;
     }
+    assert(high <= static_cast<int>(rows.size()));
     std::wstring text = std::to_wstring(high) + L" of " + std::to_wstring(rows.size()) + L" readings at or above 140/90";
     if (irregular) text += L"   -   " + std::to_wstring(irregular) + L" flagged irregular heartbeat";
     if (movement) text += L"   -   " + std::to_wstring(movement) + L" flagged movement";
@@ -55,6 +58,8 @@ std::wstring Flags(const std::vector<storage::StoredReading>& rows) {
 }  // namespace
 
 pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options& options) {
+    assert(!options.scope.empty() && !options.period.empty() && !options.generated.empty());
+    assert(rows.size() <= pdf::kMaxRows);
     pdf::Report r;
     r.title = L"Blood pressure readings";
     r.subtitle = {L"Monitor: " + options.scope, L"Period: " + options.period + L"      Generated: " + options.generated + L"      Times are as set on the monitor."};
@@ -82,6 +87,7 @@ pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options
         r.rows.push_back(std::move(cells));
     }
     r.footer = L"Exported from OMRON monitor memory by OmronBP. Reference: 140/90 mmHg.";
+    assert(r.rows.size() == rows.size());
     return r;
 }
 

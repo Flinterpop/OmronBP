@@ -40,7 +40,7 @@ constexpr DeviceLayout kHem7342T{
 };
 // clang-format on
 
-constexpr const DeviceLayout* kLayouts[] = {&kHem7600T, &kHem7342T};
+constexpr std::array<const DeviceLayout*, kLayoutCount> kLayouts{&kHem7600T, &kHem7342T};
 
 struct Alias {
     const wchar_t* name;
@@ -55,11 +55,13 @@ constexpr Alias kAliases[] = {
 
 bool SameIgnoringCaseAndPunctuation(std::wstring_view a, std::wstring_view b) {
     // Compare with '-', '_' and spaces removed, case-insensitively; both sides are short.
+    assert(a.size() < 64 && b.size() < 64);
     size_t i = 0, j = 0;
     const size_t limit = a.size() + b.size() + 1;
     for (size_t steps = 0; steps < limit; ++steps) {
         while (i < a.size() && (a[i] == L'-' || a[i] == L'_' || a[i] == L' ')) ++i;
         while (j < b.size() && (b[j] == L'-' || b[j] == L'_' || b[j] == L' ')) ++j;
+        assert(i <= a.size() && j <= b.size());
         if (i == a.size() || j == b.size()) return i == a.size() && j == b.size();
         if (std::towupper(a[i]) != std::towupper(b[j])) return false;
         ++i;
@@ -127,6 +129,7 @@ uint32_t BitsToInt(const uint8_t* data, size_t size, int first_bit, int last_bit
 
 std::optional<Reading> ParseRecord(const DeviceLayout& layout, const uint8_t* record, size_t size) {
     assert(record != nullptr);
+    assert(layout.record_size <= kMaxRecordSize);
     if (size != layout.record_size) {
         throw std::runtime_error("record size mismatch");
     }
@@ -177,6 +180,7 @@ bool ClockChecksumOk(const ClockLayout& clock, const uint8_t* record, size_t siz
 std::optional<Timestamp> ParseClock(const ClockLayout& clock, const uint8_t* record, size_t size) {
     assert(record != nullptr);
     if (size != clock.size) return std::nullopt;
+    assert(clock.checksum_span < clock.size);
     Timestamp t;
     t.year = record[clock.year] + kYearOffset;
     t.month = record[clock.month];
@@ -205,15 +209,15 @@ void EncodeClock(const ClockLayout& clock, const uint8_t* current, size_t size, 
 }
 
 const DeviceLayout* FindLayout(std::wstring_view name) {
+    assert(!name.empty());
     for (const Alias& alias : kAliases) {
         if (SameIgnoringCaseAndPunctuation(alias.name, name)) return alias.layout;
     }
     return nullptr;
 }
 
-const DeviceLayout* const* AllLayouts(size_t* count) {
-    assert(count != nullptr);
-    *count = sizeof kLayouts / sizeof kLayouts[0];
+const std::array<const DeviceLayout*, kLayoutCount>& AllLayouts() {
+    static_assert(kLayouts.size() == kLayoutCount);
     return kLayouts;
 }
 

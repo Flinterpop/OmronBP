@@ -22,6 +22,7 @@ std::wstring Widen(const char* text) {
 
 // Returns once the monitor has been heard advertising, or throws NotFound after `timeout`.
 void WaitForAdvertisement(uint64_t address, std::chrono::milliseconds timeout, const Log& log) {
+    assert(address != 0 && timeout.count() > 0 && log);
     std::atomic<bool> heard{false};
     ble::Scanner scanner([&](const ble::FoundDevice& found) {
         if (found.address == address) heard = true;
@@ -34,6 +35,7 @@ void WaitForAdvertisement(uint64_t address, std::chrono::milliseconds timeout, c
         std::this_thread::sleep_for(kPollInterval);
     }
     scanner.Stop();
+    assert(std::chrono::steady_clock::now() >= deadline || heard);
     if (!heard) {
         throw ble::NotFound("the monitor is not advertising - press its Bluetooth button so the symbol shows, then try again");
     }
@@ -66,13 +68,17 @@ std::vector<models::Reading> SplitRecords(const models::DeviceLayout& layout, si
     return readings;
 }
 
-// Reads the clock record, reports the drift and, when allowed and the layout is verified, writes PC time.
-ClockStatus CheckClock(ble::Monitor& monitor, const models::DeviceLayout& layout, bool sync, const Log& log) {
+}  // namespace
+
+ClockStatus CheckClock(ble::EepromIo& io, const models::DeviceLayout& layout, const models::Timestamp& now, bool sync, const Log& log) {
+    assert(log && now.IsValid());
     ClockStatus status;
     if (layout.clock == nullptr) return status;
     const models::ClockLayout& clock = *layout.clock;
+    assert(clock.size <= protocol::kMaxReadSize);
     status.known = true;
-    const std::vector<uint8_t> record = monitor.ReadEeprom(clock.read_address, clock.size, clock.size);
+    const std::vector<uint8_t> record = io.ReadEeprom(clock.read_address, clock.size, clock.size);
+    assert(record.size() == clock.size);
     status.verified = models::ClockChecksumOk(clock, record.data(), record.size());
     const std::optional<models::Timestamp> monitor_time = models::ParseClock(clock, record.data(), record.size());
     if (!monitor_time) {
@@ -81,7 +87,6 @@ ClockStatus CheckClock(ble::Monitor& monitor, const models::DeviceLayout& layout
     }
     status.readable = true;
     status.monitor_time = *monitor_time;
-    const models::Timestamp now = storage::LocalNow();
     status.drift_seconds = static_cast<long>(monitor_time->ToEpoch() - now.ToEpoch());
     log(ble::Level::Info, L"monitor clock " + storage::FromUtf8(monitor_time->ToString()) + L", PC " + storage::FromUtf8(now.ToString()) + L" (" +
                               (status.drift_seconds >= 0 ? L"+" : L"") + std::to_wstring(status.drift_seconds) + L" s)");
@@ -92,15 +97,12 @@ ClockStatus CheckClock(ble::Monitor& monitor, const models::DeviceLayout& layout
     }
     if (!sync) return status;
     std::array<uint8_t, protocol::kMaxReadSize> out{};
-    const models::Timestamp target = storage::LocalNow();
-    models::EncodeClock(clock, record.data(), record.size(), target, out.data());
-    monitor.WriteEeprom(clock.write_address, out.data(), clock.size);
+    models::EncodeClock(clock, record.data(), record.size(), now, out.data());
+    io.WriteEeprom(clock.write_address, out.data(), clock.size);
     status.corrected = true;
-    log(ble::Level::Info, L"monitor clock set to " + storage::FromUtf8(target.ToString()) + L" (applied when the session ends)");
+    log(ble::Level::Info, L"monitor clock set to " + storage::FromUtf8(now.ToString()) + L" (applied when the session ends)");
     return status;
 }
-
-}  // namespace
 
 void PairMonitor(uint64_t address, const models::DeviceLayout& layout, const std::vector<uint64_t>& others, const Log& log) {
     assert(address != 0 && log);
@@ -117,6 +119,7 @@ void PairMonitor(uint64_t address, const models::DeviceLayout& layout, const std
             // A freshly paired monitor expects one session before it sleeps cleanly.
             monitor.StartSession();
             monitor.EndSession();
+            assert(layout.retail != nullptr);
             log(ble::Level::Info, std::wstring(L"paired ") + layout.retail);
             return;
         } catch (const ble::NotFound&) {
@@ -158,7 +161,7 @@ DownloadResult Download(const storage::KnownDevice& device, const std::vector<ui
                     const std::vector<uint8_t> region = monitor.ReadEeprom(layout->user_start[user], size, layout->read_block_size);
                     result.per_user.push_back(SplitRecords(*layout, user, region, log));
                 }
-                result.clock = CheckClock(monitor, *layout, sync_clock, log);
+                result.clock = CheckClock(monitor, *layout, storage::LocalNow(), sync_clock, log);
             } catch (...) {
                 try {
                     monitor.EndSession();  // otherwise the monitor shows "Err"
@@ -181,6 +184,7 @@ DownloadResult Download(const storage::KnownDevice& device, const std::vector<ui
         }
     }
     assert(result.per_user.size() == layout->user_count);
+    assert(!paths.csv.empty());
     result.appended = storage::AppendReadings(paths.csv, device.name, device.model, result.per_user);
     return result;
 }

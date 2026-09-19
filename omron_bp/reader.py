@@ -129,7 +129,9 @@ async def _check_clock(transport: OmronTransport, layout: DeviceLayout, sync: bo
     clock = layout.clock
     if clock is None:
         return None
+    assert 0 < clock.size <= 0x38
     record = await transport.read_eeprom(clock.read_address, clock.size, clock.size)
+    assert len(record) == clock.size
     verified = clock_checksum_ok(clock, record)
     log.debug("clock record %s (checksum %s)", record.hex(), "ok" if verified else "MISMATCH")
     try:
@@ -159,7 +161,9 @@ async def _correct_clock(transport: OmronTransport, clock: ClockLayout, record: 
     read back within the same session; the drift reported by the next read is
     the confirmation.
     """
+    assert len(record) == clock.size and clock_checksum_ok(clock, record)
     target = datetime.now().replace(microsecond=0)
+    assert target.year >= 2000
     await transport.write_eeprom(clock.write_address, encode_clock(clock, record, target))
     log.info("monitor clock set to %s (applied when the session ends)", target.strftime("%Y-%m-%d %H:%M:%S"))
     return True

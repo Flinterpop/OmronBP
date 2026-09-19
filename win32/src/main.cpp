@@ -1,9 +1,10 @@
 // OMRON blood-pressure reader: main window.
 //
-// Layout:  [Read all monitors] [Pair new monitor...] [Open readings.csv]      status
-//          monitors list | summary + range buttons
-//                        | chart
+// Layout:  [Read all] [Pair...] [Open CSV] [Forget] [Export...]      [30d] [90d] [12m] [All]
+//          monitors list | summary line
+//                        | chart (Direct2D)
 //                        | readings table
+//          status line                       [clock sync] [Bluetooth details]
 //          activity log
 #include <windows.h>
 
@@ -52,8 +53,16 @@ void LogQueue::Push(ble::Level level, const std::wstring& text) {
     ++count_;
 }
 
+size_t LogQueue::TakeDropped() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const size_t dropped = dropped_;
+    dropped_ = 0;
+    return dropped;
+}
+
 bool LogQueue::Pop(Entry& out) {
     std::lock_guard<std::mutex> lock(mutex_);
+    assert(count_ <= kCapacity && head_ < kCapacity);
     if (count_ == 0) return false;
     out = ring_[head_];
     head_ = (head_ + 1) % kCapacity;
@@ -107,6 +116,7 @@ private:
     LRESULT Proc(UINT msg, WPARAM wp, LPARAM lp);
 
     void OnCreate();
+    void CreateColumns();
     void CreateFonts();
     void Layout();
     void OnCommand(int id);
@@ -154,7 +164,10 @@ void MainWindow::Register(HINSTANCE instance) {
     wc.lpszClassName = kClassName;
     wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
     wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
-    RegisterClassExW(&wc);
+    assert(wc.hIcon != nullptr && wc.hIconSm != nullptr);
+    const ATOM atom = RegisterClassExW(&wc);
+    assert(atom != 0);
+    (void)atom;
 }
 
 HWND MainWindow::Create(HINSTANCE instance) {
@@ -231,7 +244,9 @@ void MainWindow::CreateFonts() {
 void MainWindow::OnCreate() {
     HINSTANCE inst = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
     auto make = [&](const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex = 0) {
-        return CreateWindowExW(ex, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), inst, nullptr);
+        HWND h = CreateWindowExW(ex, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, hwnd_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), inst, nullptr);
+        if (h == nullptr) throw std::runtime_error("control creation failed");
+        return h;
     };
     read_all_ = make(L"BUTTON", L"Read all monitors", WS_TABSTOP | BS_PUSHBUTTON, kIdReadAll);
     pair_ = make(L"BUTTON", L"Pair new monitor...", WS_TABSTOP | BS_PUSHBUTTON, kIdPair);
@@ -254,13 +269,32 @@ void MainWindow::OnCreate() {
     Button_SetCheck(sync_clock_, BST_CHECKED);
     ListView_SetExtendedListViewStyle(devices_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     ListView_SetExtendedListViewStyle(readings_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    CreateColumns();
 
+    wchar_t exe[MAX_PATH];
+    const DWORD exe_len = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (exe_len == 0 || exe_len >= MAX_PATH) throw std::runtime_error("cannot locate the executable");
+    const std::filesystem::path dir = std::filesystem::path(exe).parent_path();
+    assert(!dir.empty());
+    paths_.csv = dir / L"readings.csv";
+    paths_.devices = dir / L"devices.json";
+
+    CreateFonts();
+    LoadData();
+    SetWindowTextW(status_, devices_list_.empty() ? L"Welcome. Click 'Pair new monitor...' to add your first OMRON monitor."
+                                                  : L"Press the Bluetooth button on a monitor so its symbol shows, then click 'Read all monitors'.");
+}
+
+void MainWindow::CreateColumns() {
+    assert(devices_ != nullptr && readings_ != nullptr);
     auto column = [&](HWND list, int index, const wchar_t* title, int width, int fmt = LVCFMT_LEFT) {
         LVCOLUMNW col{LVCF_TEXT | LVCF_WIDTH | LVCF_FMT};
         col.pszText = const_cast<wchar_t*>(title);
         col.cx = app::Scale(hwnd_, width);
         col.fmt = fmt;
-        ListView_InsertColumn(list, index, &col);
+        const int inserted = ListView_InsertColumn(list, index, &col);
+        assert(inserted == index);
+        (void)inserted;
     };
     column(devices_, 0, L"Monitor", 84);
     column(devices_, 1, L"Model", 84);
@@ -273,17 +307,7 @@ void MainWindow::OnCreate() {
     column(readings_, 4, L"Diastolic", 62, LVCFMT_RIGHT);
     column(readings_, 5, L"Pulse", 48, LVCFMT_RIGHT);
     column(readings_, 6, L"Notes", 170);
-
-    wchar_t exe[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    const std::filesystem::path dir = std::filesystem::path(exe).parent_path();
-    paths_.csv = dir / L"readings.csv";
-    paths_.devices = dir / L"devices.json";
-
-    CreateFonts();
-    LoadData();
-    SetWindowTextW(status_, devices_list_.empty() ? L"Welcome. Click 'Pair new monitor...' to add your first OMRON monitor."
-                                                  : L"Press the Bluetooth button on a monitor so its symbol shows, then click 'Read all monitors'.");
+    assert(Header_GetItemCount(ListView_GetHeader(devices_)) == 4 && Header_GetItemCount(ListView_GetHeader(readings_)) == 7);
 }
 
 void MainWindow::Layout() {
@@ -293,8 +317,13 @@ void MainWindow::Layout() {
     const int pad = s(10), gap = s(6), bar_h = s(30), status_h = s(20), log_h = s(88), left_w = s(390), range_h = s(22);
     int y = pad;
     int x = pad;
+    assert(rc.right > 0 && rc.bottom > 0);
     HDWP dwp = BeginDeferWindowPos(16);
-    auto place = [&](HWND h, int px, int py, int w, int hgt) { dwp = DeferWindowPos(dwp, h, nullptr, px, py, w, hgt, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS); };
+    assert(dwp != nullptr);
+    auto place = [&](HWND h, int px, int py, int w, int hgt) {
+        assert(h != nullptr && w >= 0 && hgt >= 0);
+        if (dwp != nullptr) dwp = DeferWindowPos(dwp, h, nullptr, px, py, w, hgt, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+    };
     place(read_all_, x, y, s(140), bar_h);
     x += s(140) + gap;
     place(pair_, x, y, s(140), bar_h);
@@ -321,7 +350,7 @@ void MainWindow::Layout() {
     place(sync_clock_, rc.right - pad - s(390), bottom + gap, s(210), status_h);
     place(verbose_, rc.right - pad - s(170), bottom + gap, s(170), status_h);
     place(log_, pad, bottom + gap + status_h + gap, rc.right - 2 * pad, log_h);
-    EndDeferWindowPos(dwp);
+    if (dwp != nullptr) EndDeferWindowPos(dwp);
     ListView_SetColumnWidth(devices_, 3, LVSCW_AUTOSIZE_USEHEADER);
     ListView_SetColumnWidth(readings_, 6, LVSCW_AUTOSIZE_USEHEADER);
     // Children that shrank leave stale pixels behind; repaint everything once per layout.
@@ -348,6 +377,7 @@ void MainWindow::LoadData() {
 }
 
 void MainWindow::RefreshDeviceList() {
+    assert(devices_list_.size() <= storage::kMaxDevices);
     const int previous = selected_;
     ListView_DeleteAllItems(devices_);
     for (size_t i = 0; i < devices_list_.size(); ++i) {
@@ -372,11 +402,13 @@ void MainWindow::RefreshDeviceList() {
         ListView_SetItemText(devices_, item.iItem, 3, const_cast<wchar_t*>(latest_text.c_str()));
     }
     selected_ = devices_list_.empty() ? -1 : std::clamp(previous, 0, static_cast<int>(devices_list_.size()) - 1);
+    assert(selected_ < static_cast<int>(devices_list_.size()));
     if (selected_ >= 0) ListView_SetItemState(devices_, selected_, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
     RefreshSelected();
 }
 
 void MainWindow::RefreshSelected() {
+    assert(selected_ >= -1 && selected_ < static_cast<int>(devices_list_.size()));
     std::vector<storage::StoredReading> rows;
     std::wstring summary;
     if (selected_ >= 0 && selected_ < static_cast<int>(devices_list_.size())) {
@@ -402,6 +434,7 @@ void MainWindow::RefreshSelected() {
     } else {
         summary = devices_list_.empty() ? L"No monitors paired yet." : L"Select a monitor.";
     }
+    assert(!summary.empty());
     SetWindowTextW(summary_, summary.c_str());
     EnableWindow(remove_, selected_ >= 0 && !busy_);
     chart::SetData(chart_, rows);
@@ -409,6 +442,7 @@ void MainWindow::RefreshSelected() {
 }
 
 void MainWindow::RefreshReadingsTable(const std::vector<storage::StoredReading>& rows) {
+    assert(readings_ != nullptr && rows.size() <= storage::kMaxRows);
     SendMessageW(readings_, WM_SETREDRAW, FALSE, 0);
     ListView_DeleteAllItems(readings_);
     const size_t shown = std::min(rows.size(), kMaxListRows);
@@ -453,9 +487,13 @@ void MainWindow::AppendLog(const std::wstring& line) {
 }
 
 void MainWindow::DrainLog() {
+    assert(log_ != nullptr && status_ != nullptr);
     app::LogQueue::Entry entry;
     const bool verbose = Button_GetCheck(verbose_) == BST_CHECKED;
+    const size_t dropped = queue_.TakeDropped();
+    if (dropped > 0) AppendLog(L"    (" + std::to_wstring(dropped) + L" detail lines dropped)");
     for (int i = 0; i < 512 && queue_.Pop(entry); ++i) {
+        assert(!entry.text.empty() || entry.level == ble::Level::Debug);
         if (entry.level == ble::Level::Info) {
             SetWindowTextW(status_, entry.text.c_str());
             AppendLog(entry.text);
@@ -467,6 +505,7 @@ void MainWindow::DrainLog() {
 
 void MainWindow::StartWorker(std::function<bool()> job) {
     assert(!busy_);
+    assert(job);
     if (worker_.joinable()) worker_.join();
     SetBusy(true);
     SetWindowTextW(log_, L"");
@@ -488,6 +527,7 @@ void MainWindow::ReadMonitors(std::vector<storage::KnownDevice> targets) {
     const workflow::Paths paths = paths_;
     const bool sync_clock = Button_GetCheck(sync_clock_) == BST_CHECKED;
     const std::vector<storage::KnownDevice> all = devices_list_;
+    assert(targets.size() <= all.size());
     auto log = [this](ble::Level level, const std::wstring& text) {
         queue_.Push(level, text);
         PostMessageW(hwnd_, app::WM_APP_LOG, 0, 0);
@@ -538,6 +578,7 @@ void MainWindow::PairNew() {
     }
     updated.push_back({choice->name, layout->model, storage::FormatAddress(choice->address)});
     const std::vector<uint64_t> others = OtherAddresses(choice->address);
+    assert(others.size() < storage::kMaxDevices);
     const workflow::Paths paths = paths_;
     const pair_dialog::Result result = *choice;
     auto log = [this](ble::Level level, const std::wstring& text) {
@@ -560,12 +601,14 @@ void MainWindow::PairNew() {
 }
 
 void MainWindow::RemoveSelected() {
+    assert(!busy_);
     if (selected_ < 0 || selected_ >= static_cast<int>(devices_list_.size())) return;
     const storage::KnownDevice device = devices_list_[static_cast<size_t>(selected_)];
     const std::wstring text = L"Forget '" + device.name + L"'?\n\nIts readings stay in readings.csv; only the pairing entry is removed. To read it again you will need to pair it again.";
     if (MessageBoxW(hwnd_, text.c_str(), app::kAppTitle, MB_ICONQUESTION | MB_OKCANCEL) != IDOK) return;
     std::vector<storage::KnownDevice> updated = devices_list_;
     updated.erase(updated.begin() + selected_);
+    assert(updated.size() + 1 == devices_list_.size());
     try {
         storage::SaveDevices(paths_.devices, updated);
     } catch (const std::exception& exc) {
@@ -590,6 +633,7 @@ void MainWindow::ExportReadings() {
     if (!choice) return;
     const std::vector<storage::StoredReading> rows = filtered(*choice);
     assert(!rows.empty());
+    assert(choice->days >= 0);
 
     wchar_t date[16];
     swprintf_s(date, L"%04d-%02d-%02d", now.year, now.month, now.day);
@@ -630,6 +674,8 @@ void MainWindow::ExportReadings() {
 }
 
 void MainWindow::OnCommand(int id) {
+    assert(id >= kIdReadAll && id <= kIdSyncClock);
+    assert(hwnd_ != nullptr);
     switch (id) {
         case kIdReadAll:
             if (devices_list_.empty()) {
@@ -674,16 +720,25 @@ void MainWindow::OnDone(bool ok) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+    assert(instance != nullptr);
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     INITCOMMONCONTROLSEX icc{sizeof icc, ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&icc);
     MainWindow::Register(instance);
     chart::RegisterClass(instance);
     MainWindow window;
-    HWND hwnd = window.Create(instance);
+    HWND hwnd = nullptr;
+    try {
+        hwnd = window.Create(instance);
+    } catch (const std::exception& exc) {
+        MessageBoxW(nullptr, storage::FromUtf8(exc.what()).c_str(), app::kAppTitle, MB_ICONERROR);
+        return 1;
+    }
     if (!hwnd) return 1;
+    assert(IsWindow(hwnd));
     ShowWindow(hwnd, show);
     MSG msg;
+    // The message pump runs until WM_QUIT; GetMessage returns -1 on error, which also ends it.
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (!IsDialogMessageW(hwnd, &msg)) {
             TranslateMessage(&msg);

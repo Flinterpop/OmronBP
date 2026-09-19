@@ -26,6 +26,7 @@ State* Self(HWND dlg) {
 }
 
 Choice Current(HWND dlg) {
+    assert(dlg != nullptr);
     Choice c;
     c.all_monitors = IsDlgButtonChecked(dlg, IDC_EXPORT_ALL) == BST_CHECKED;
     const int sel = ComboBox_GetCurSel(GetDlgItem(dlg, IDC_EXPORT_PERIOD));
@@ -36,6 +37,7 @@ Choice Current(HWND dlg) {
 
 void UpdatePreview(HWND dlg) {
     State* s = Self(dlg);
+    assert(s != nullptr && s->count != nullptr);
     const size_t n = (*s->count)(Current(dlg));
     const std::wstring text = n == 0 ? L"No readings match - nothing to export." : std::to_wstring(n) + (n == 1 ? L" reading will be exported." : L" readings will be exported.");
     SetDlgItemTextW(dlg, IDC_EXPORT_INFO, text.c_str());

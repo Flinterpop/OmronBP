@@ -142,6 +142,7 @@ class Packet:
 
 def parse_packet(raw: bytes) -> Packet:
     assert HEADER_SIZE + TRAILER_SIZE <= len(raw) <= MAX_PACKET, len(raw)
+    assert isinstance(raw, bytes)
     if raw[0] != len(raw):
         raise ProtocolError(f"length byte {raw[0]} != packet length {len(raw)}: {raw.hex()}")
     if xor_checksum(raw) != 0:
@@ -206,6 +207,7 @@ class OmronTransport:
     def _on_rx(self, char: BleakGATTCharacteristic, data: bytearray) -> None:
         channel = self._channel_by_uuid.get(char.uuid.lower())
         assert channel is not None, char.uuid
+        assert 0 < len(data) <= CHANNEL_WIDTH + 4, len(data)
         log.debug("rx ch%d < %s", channel, bytes(data).hex())
         try:
             packet = self._assembler.push(channel, bytes(data))
@@ -256,6 +258,7 @@ class OmronTransport:
     async def send(self, command: bytes) -> Packet:
         """Write ``command`` and wait for the reassembled reply, retrying on timeout."""
         assert self._listening, "call open() first"
+        assert 0 < len(command) <= MAX_PACKET
         for attempt in range(1, MAX_RETRIES + 1):
             self._arm_reply()
             await self._write_chunks(command)
@@ -284,6 +287,7 @@ class OmronTransport:
             raise ProtocolError(f"device reported error status {status} at end of session")
 
     async def read_block(self, address: int, size: int) -> bytes:
+        assert 0 < size <= MAX_READ_SIZE and 0 <= address <= 0xFFFF
         reply = await self.send(build_read_command(address, size))
         if reply.kind != RSP_READ:
             raise ProtocolError(f"unexpected reply to read: {reply.raw.hex()}")
@@ -297,6 +301,7 @@ class OmronTransport:
             return b"\xff" * size
         if len(data) != size:
             raise ProtocolError(f"reply carried {len(data)} bytes, expected {size}: {reply.raw.hex()}")
+        assert len(data) == size
         return data
 
     async def write_eeprom(self, address: int, data: bytes) -> None:
@@ -350,12 +355,14 @@ class OmronTransport:
             reply = await self._unlock_exchange(UNLOCK_OP_UNLOCK, key)
         finally:
             await self._client.stop_notify(UNLOCK_UUID)
+        assert len(reply) >= 2
         if reply[:2] != UNLOCK_RSP_UNLOCKED:
             raise ProtocolError("key rejected - run 'pair' with the monitor in pairing mode (blinking P)")
 
     async def pair(self, key: bytes) -> None:
         """Store a new pairing key.  The monitor must be showing the blinking ``P``."""
         assert len(key) == KEY_SIZE, "key must be 16 bytes"
+        assert key != bytes(KEY_SIZE), "an all-zero key means 'enter pairing mode'"
         # Subscribing to an RX channel prompts the monitor to request BLE
         # security, which is what starts the OS-level bonding.
         await self._client.start_notify(RX_UUIDS[0], self._on_rx)

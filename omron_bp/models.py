@@ -137,6 +137,7 @@ def parse_record(layout: DeviceLayout, record: bytes) -> Reading:
     systolic = field(bits.systolic) + SYSTOLIC_OFFSET
     diastolic = field(bits.diastolic)
     pulse = field(bits.pulse)
+    assert systolic >= SYSTOLIC_OFFSET and diastolic >= 0 and pulse >= 0
     # Some firmware stores seconds in a 6-bit field that can exceed 59.
     second = min(field(bits.second), MAX_SECOND)
     try:
@@ -178,6 +179,7 @@ def clock_checksum_ok(clock: ClockLayout, record: bytes) -> bool:
 def parse_clock(clock: ClockLayout, record: bytes) -> datetime:
     """Decode the monitor's clock.  Raises ``ValueError`` for an invalid date."""
     assert len(record) == clock.size
+    assert clock.checksum_span < clock.size
     try:
         return datetime(
             record[clock.year] + YEAR_OFFSET,

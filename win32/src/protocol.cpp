@@ -75,6 +75,7 @@ Packet ParsePacket(const uint8_t* raw, size_t size) {
     if (XorChecksum(raw, size) != 0) {
         throw ProtocolError("checksum failure: " + Hex(raw, size));
     }
+    assert(raw[0] == size);
     Packet packet;
     packet.kind = static_cast<uint16_t>((raw[1] << 8) | raw[2]);
     packet.address = static_cast<uint16_t>((raw[3] << 8) | raw[4]);

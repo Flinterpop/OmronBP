@@ -39,6 +39,7 @@ def _key(device: str, user: int, reading: Reading) -> ReadingKey:
 
 def existing_keys(path: Path) -> set[ReadingKey]:
     """Keys of every reading already in the CSV (empty set if it does not exist)."""
+    assert path.name, "path required"
     if not path.is_file():
         return set()
     keys: set[ReadingKey] = set()
@@ -48,6 +49,7 @@ def existing_keys(path: Path) -> set[ReadingKey]:
             if row_number >= MAX_CSV_ROWS:
                 raise RuntimeError(f"{path} has more than {MAX_CSV_ROWS} rows")
             keys.add((row["device"], int(row["user"]), row["timestamp"], int(row["systolic"]), int(row["diastolic"]), int(row["pulse"])))
+    assert len(keys) <= MAX_CSV_ROWS
     return keys
 
 

@@ -27,7 +27,7 @@ Notes:
 
 ## Windows app (no Python needed)
 
-`win32/` holds a native Windows version of the same tool: a single portable `OmronBP.exe` (about 550 KB, no installer, no runtime DLLs) with a point-and-click UI. It uses the same `readings.csv` and `devices.json`, kept next to the exe, so the Python tool and the app can be used interchangeably on the same data.
+`win32/` holds a native Windows version of the same tool: a single portable `OmronBP.exe` (about 650 KB, no installer, no runtime DLLs) with a point-and-click UI. It uses the same `readings.csv` and `devices.json`, kept next to the exe, so the Python tool and the app can be used interchangeably on the same data.
 
 - **Read all monitors** — press the Bluetooth button on each monitor, click once; new readings are appended and the chart, table and per-monitor summary refresh. Bond swapping between monitors happens automatically.
 - **Pair new monitor...** — opens a dialog that lists OMRON monitors live as they advertise; put the monitor in pairing mode, pick it, choose its model and a nickname.
@@ -42,7 +42,7 @@ Build (Visual Studio 2026, CMake):
 cd win32
 cmake -S . -B build -A x64
 cmake --build build --config Release
-build\Release\core_tests.exe      # protocol, decoder, storage and PDF tests: 83 checks
+build\Release\core_tests.exe      # protocol, decoder, storage, PDF and clock-sync tests: 93 checks
 ```
 
 The exe is `win32/build/Release/OmronBP.exe`; copy it anywhere. It is written in C++20 against the raw Win32 API, with C++/WinRT for Bluetooth LE and Direct2D for the chart; the protocol, record decoding and storage code mirrors the Python modules one-to-one and is covered by `win32/tests/core_tests.cpp`.
@@ -160,7 +160,7 @@ Commands are XOR-checksummed packets split into 16-byte chunks across four write
 ## Development
 
 ```powershell
-python -m pytest                     # 48 tests
+python -m pytest                     # 62 tests
 python -m ruff check .
 python -m mypy omron_bp tests
 ```

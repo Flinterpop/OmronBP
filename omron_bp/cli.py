@@ -1,4 +1,4 @@
-"""Command-line interface: ``scan``, ``pair`` and ``read``."""
+"""Command-line interface: ``scan``, ``pair``, ``read``, ``export``, ``chart`` and ``models``."""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ CONNECT_RETRY_DELAY_S = 2.0
 
 
 def _parse_key(text: str | None) -> bytes:
+    assert len(reader.DEFAULT_KEY) == KEY_SIZE
     if text is None:
         return reader.DEFAULT_KEY
     try:
@@ -41,6 +42,7 @@ def _parse_key(text: str | None) -> bytes:
         raise SystemExit(f"--key must be {KEY_SIZE * 2} hex digits") from exc
     if len(key) != KEY_SIZE:
         raise SystemExit(f"--key must be {KEY_SIZE * 2} hex digits, got {len(text)}")
+    assert len(key) == KEY_SIZE
     return key
 
 
@@ -104,6 +106,7 @@ def cmd_chart(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    assert args.csv is not None
     if args.days < 0 or args.days > 36500:
         raise SystemExit("--days must be between 0 and 36500")
     since = datetime.now() - timedelta(days=args.days) if args.days else None
@@ -111,6 +114,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         f"readings_{args.device or 'all'}_{'last' + str(args.days) + 'days' if args.days else 'everything'}_{datetime.now():%Y-%m-%d}.csv"
     )
     count = export_readings(args.csv, out, since=since, device=args.device)
+    assert count >= 0
     print(f"{count} reading{'s' if count != 1 else ''} exported to {out}")
     if args.pdf:
         options = pdf.ReportOptions(
@@ -128,10 +132,12 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def cmd_scan(timeout_s: float, include_all: bool) -> int:
+    assert isinstance(include_all, bool)
     if not 0 < timeout_s <= MAX_SCAN_S:
         raise SystemExit(f"--timeout must be between 0 and {MAX_SCAN_S}")
     print(f"Scanning for {timeout_s:.0f}s ... (press the Bluetooth button on the monitor)")
     found = asyncio.run(reader.scan(timeout_s, include_all))
+    assert include_all or all(d.is_omron for d in found)
     if not found:
         print("No OMRON monitors seen. Try again with the monitor's Bluetooth symbol showing.")
         return 1
@@ -152,8 +158,10 @@ def _auto_detect_address(timeout_s: float) -> str:
 
 
 def cmd_pair(args: argparse.Namespace, key: bytes) -> int:
+    assert len(key) == KEY_SIZE and args.name
     layout = resolve_layout(args.model)
     address = args.address or _auto_detect_address(args.timeout)
+    assert address
     print(f"Pairing '{args.name}' ({layout.model}) at {address}.")
     others = _other_addresses(load_devices(args.devices), address)
     try:
@@ -171,6 +179,7 @@ def _other_addresses(registry: dict[str, KnownDevice], address: str) -> list[str
 
 
 def _targets(args: argparse.Namespace) -> list[KnownDevice]:
+    assert args.devices is not None
     if args.address or args.model:
         if not (args.address and args.model):
             raise SystemExit("--model and --address must be given together")
@@ -183,7 +192,9 @@ def _targets(args: argparse.Namespace) -> list[KnownDevice]:
         return [registry[n] for n in args.names]
     if not registry:
         raise SystemExit(f"no devices in {args.devices}; run 'pair' first or give --model/--address")
-    return list(registry.values())
+    targets = list(registry.values())
+    assert 0 < len(targets) <= MAX_DEVICES_PER_RUN
+    return targets
 
 
 def _print_summary(device: KnownDevice, per_user: list[list[Reading]]) -> None:
@@ -195,11 +206,13 @@ def _print_summary(device: KnownDevice, per_user: list[list[Reading]]) -> None:
 
 
 def _print_clock(clock: reader.ClockStatus | None) -> None:
+    assert clock is None or isinstance(clock, reader.ClockStatus)
     if clock is None:
         print("  clock: no known clock layout for this model")
     elif clock.monitor_time is None:
         print("  clock: could not be read")
     elif clock.corrected:
+        assert clock.verified, "a clock is only corrected after its record verified"
         print(f"  clock: was {clock.drift_seconds:+d} s off, set to PC time (confirmed on the next read)")
     elif abs(clock.drift_seconds) <= reader.CLOCK_TOLERANCE_S:
         print(f"  clock: OK ({clock.drift_seconds:+d} s)")
@@ -211,6 +224,7 @@ def _print_clock(clock: reader.ClockStatus | None) -> None:
 
 def _download_with_retry(device: KnownDevice, key: bytes, others: list[str], sync_clock: bool) -> reader.DownloadResult | None:
     """Monitors sometimes drop a fresh connection; retry a few times before giving up."""
+    assert device.address and len(key) == KEY_SIZE
     layout = resolve_layout(device.model)
     for attempt in range(1, CONNECT_ATTEMPTS + 1):
         try:
@@ -219,6 +233,7 @@ def _download_with_retry(device: KnownDevice, key: bytes, others: list[str], syn
             print(f"  attempt {attempt}/{CONNECT_ATTEMPTS} failed: {exc}")
             if attempt < CONNECT_ATTEMPTS:
                 time.sleep(CONNECT_RETRY_DELAY_S)
+    assert CONNECT_ATTEMPTS >= 1
     return None
 
 
@@ -226,6 +241,7 @@ def cmd_read(args: argparse.Namespace, key: bytes) -> int:
     targets = _targets(args)
     assert 0 < len(targets) <= MAX_DEVICES_PER_RUN
     registry = load_devices(args.devices)
+    assert len(registry) <= 16
     failures = 0
     for device in targets:
         layout = resolve_layout(device.model)
@@ -252,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.debug:
         logging.getLogger("bleak").setLevel(logging.WARNING)
     key = _parse_key(args.key)
+    assert args.command in {"models", "scan", "pair", "read", "chart", "export"}
 
     if args.command == "models":
         return cmd_models()

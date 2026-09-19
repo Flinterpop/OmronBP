@@ -94,6 +94,7 @@ void EncodeClock(const ClockLayout& clock, const uint8_t* current, size_t size, 
 
 // Known layouts and the names (model or retail alias) that select them; case-insensitive.
 const DeviceLayout* FindLayout(std::wstring_view name);
-const DeviceLayout* const* AllLayouts(size_t* count);
+constexpr size_t kLayoutCount = 2;
+const std::array<const DeviceLayout*, kLayoutCount>& AllLayouts();
 
 }  // namespace omron::models
