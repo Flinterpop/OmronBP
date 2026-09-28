@@ -15,6 +15,8 @@ namespace omron::chart {
 namespace {
 
 constexpr int kGapDays = 30;  // no line across a gap longer than this
+constexpr int kAverageRangeDays = 30;  // the moving average is drawn only in this view
+constexpr int kAverageDays = 7;        // trailing window of the moving average
 constexpr int kSysHigh = 140, kDiaHigh = 90;
 constexpr size_t kMaxDotsDrawn = 150;
 constexpr float kMarginL = 44, kMarginR = 56, kMarginT = 26, kMarginB = 26;
@@ -77,10 +79,21 @@ float NiceStep(float span, int target) {
     return 10.0f * pow10;
 }
 
+D2D1_COLOR_F Faded(D2D1_COLOR_F c) {
+    c.a = 0.4f;
+    return c;
+}
+
+// Trailing moving average at one reading, over the readings in the kAverageDays before it (inclusive).
+struct Average {
+    float systolic, diastolic, pulse;
+};
+
 struct Series {
     const wchar_t* label;
     D2D1_COLOR_F color;
     int Point::*value;
+    float Average::*average;
 };
 
 struct Panel {
@@ -88,7 +101,8 @@ struct Panel {
     float ymin, ymax;
     int64_t t0, t1;
     float X(int64_t t) const { return plot.left + static_cast<float>(t - t0) / static_cast<float>(std::max<int64_t>(1, t1 - t0)) * (plot.right - plot.left); }
-    float Y(int v) const { return plot.top + (ymax - static_cast<float>(v)) / (ymax - ymin) * (plot.bottom - plot.top); }
+    float Y(float v) const { return plot.top + (ymax - v) / (ymax - ymin) * (plot.bottom - plot.top); }
+    float Y(int v) const { return Y(static_cast<float>(v)); }
 };
 
 class ChartWindow {
@@ -106,7 +120,9 @@ public:
 private:
     bool EnsureTarget();
     void ComputeVisible();
+    void ComputeAverages();
     void DrawEmpty();
+    void DrawAverage(const Panel& p, const Series& series);
     void DrawPanel(const Panel& p, const wchar_t* title, const Series* series, size_t count, bool refs);
     void DrawXAxis(const Panel& p);
     void DrawLegend(const Panel& p, const Series* series, size_t count);
@@ -121,6 +137,7 @@ private:
     winrt::com_ptr<IDWriteTextFormat> small_, title_, bold_;
     std::vector<Point> all_;
     std::vector<Point> visible_;
+    std::vector<Average> averages_;  // one per visible_ point, or empty when not shown
     int range_days_ = 0;
     int hover_ = -1;
     bool tracking_ = false;
@@ -154,6 +171,29 @@ void ChartWindow::ComputeVisible() {
     for (const Point& p : all_) {
         if (p.epoch >= cutoff) visible_.push_back(p);
     }
+    ComputeAverages();
+}
+
+void ChartWindow::ComputeAverages() {
+    averages_.clear();
+    if (range_days_ != kAverageRangeDays || visible_.empty()) return;
+    // visible_ is a suffix of the sorted all_, so readings just before the view still feed the first averages.
+    const size_t offset = all_.size() - visible_.size();
+    assert(offset < all_.size() && all_[offset].epoch == visible_.front().epoch);
+    averages_.reserve(visible_.size());
+    int64_t sys = 0, dia = 0, pulse = 0;
+    size_t lo = 0;
+    for (size_t hi = 0; hi < all_.size(); ++hi) {
+        sys += all_[hi].systolic, dia += all_[hi].diastolic, pulse += all_[hi].pulse;
+        while (lo < hi && all_[lo].epoch <= all_[hi].epoch - static_cast<int64_t>(kAverageDays) * kDay) {
+            sys -= all_[lo].systolic, dia -= all_[lo].diastolic, pulse -= all_[lo].pulse;
+            ++lo;
+        }
+        if (hi < offset) continue;
+        const float n = static_cast<float>(hi - lo + 1);
+        averages_.push_back({static_cast<float>(sys) / n, static_cast<float>(dia) / n, static_cast<float>(pulse) / n});
+    }
+    assert(averages_.size() == visible_.size());
 }
 
 bool ChartWindow::EnsureTarget() {
@@ -254,7 +294,9 @@ void ChartWindow::DrawXAxis(const Panel& p) {
 void ChartWindow::DrawPanel(const Panel& p, const wchar_t* title, const Series* series, size_t count, bool refs) {
     assert(series != nullptr && count > 0 && count <= 2 && p.ymax > p.ymin);
     assert(!visible_.empty());
-    Text(title, p.plot.left, p.plot.top - 12, title_.get(), kInk2);
+    const bool averaged = !averages_.empty();
+    Text(averaged ? std::wstring(title) + L"   thick line: " + std::to_wstring(kAverageDays) + L"-day average" : std::wstring(title), p.plot.left, p.plot.top - 12,
+         title_.get(), kInk2, DWRITE_TEXT_ALIGNMENT_LEADING, 360);
     const int target = std::clamp(static_cast<int>((p.plot.bottom - p.plot.top) / 36.0f), 2, 6);
     const float step = NiceStep(p.ymax - p.ymin, target);
     for (float v = std::ceil(p.ymin / step) * step; v <= p.ymax + 0.01f; v += step) {
@@ -273,23 +315,37 @@ void ChartWindow::DrawPanel(const Panel& p, const wchar_t* title, const Series* 
     }
     DrawXAxis(p);
     for (size_t s = 0; s < count; ++s) {
-        brush_->SetColor(series[s].color);
+        // With the average shown, the raw readings recede so the trend reads first.
+        const D2D1_COLOR_F raw = averaged ? Faded(series[s].color) : series[s].color;
+        brush_->SetColor(raw);
         for (size_t i = 1; i < visible_.size(); ++i) {
             if (visible_[i].epoch - visible_[i - 1].epoch > kGapDays * kDay) continue;
             target_->DrawLine(D2D1::Point2F(p.X(visible_[i - 1].epoch), p.Y(visible_[i - 1].*series[s].value)),
-                              D2D1::Point2F(p.X(visible_[i].epoch), p.Y(visible_[i].*series[s].value)), brush_.get(), 2.0f);
+                              D2D1::Point2F(p.X(visible_[i].epoch), p.Y(visible_[i].*series[s].value)), brush_.get(), averaged ? 1.5f : 2.0f);
         }
         if (visible_.size() <= kMaxDotsDrawn) {
             for (const Point& pt : visible_) {
                 const D2D1_ELLIPSE dot = D2D1::Ellipse(D2D1::Point2F(p.X(pt.epoch), p.Y(pt.*series[s].value)), 3.5f, 3.5f);
                 brush_->SetColor(kSurface);
                 target_->FillEllipse(D2D1::Ellipse(dot.point, 5.0f, 5.0f), brush_.get());
-                brush_->SetColor(series[s].color);
+                brush_->SetColor(raw);
                 target_->FillEllipse(dot, brush_.get());
             }
         }
+        if (averaged) DrawAverage(p, series[s]);
         const Point& last = visible_.back();
         Text(std::to_wstring(last.*series[s].value), p.X(last.epoch) + 8, p.Y(last.*series[s].value), bold_.get(), kInk);
+    }
+}
+
+void ChartWindow::DrawAverage(const Panel& p, const Series& series) {
+    assert(series.average != nullptr);
+    assert(averages_.size() == visible_.size());
+    brush_->SetColor(series.color);
+    for (size_t i = 1; i < visible_.size(); ++i) {
+        if (visible_[i].epoch - visible_[i - 1].epoch > kGapDays * kDay) continue;
+        target_->DrawLine(D2D1::Point2F(p.X(visible_[i - 1].epoch), p.Y(averages_[i - 1].*series.average)),
+                          D2D1::Point2F(p.X(visible_[i].epoch), p.Y(averages_[i].*series.average)), brush_.get(), 3.0f);
     }
 }
 
@@ -309,9 +365,16 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
         brush_->SetColor(colors[i]);
         target_->FillEllipse(D2D1::Ellipse(centers[i], 5.5f, 5.5f), brush_.get());
     }
-    std::wstring lines[3] = {FormatDateTime(pt.epoch), L"Systolic " + std::to_wstring(pt.systolic) + L"   Diastolic " + std::to_wstring(pt.diastolic),
-                             L"Pulse " + std::to_wstring(pt.pulse) + (pt.irregular ? L"   irregular heartbeat" : L"") + (pt.movement ? L"   movement" : L"")};
-    const float w = 190, h = 54;
+    std::wstring lines[4] = {FormatDateTime(pt.epoch), L"Systolic " + std::to_wstring(pt.systolic) + L"   Diastolic " + std::to_wstring(pt.diastolic),
+                             L"Pulse " + std::to_wstring(pt.pulse) + (pt.irregular ? L"   irregular heartbeat" : L"") + (pt.movement ? L"   movement" : L""), L""};
+    const bool averaged = !averages_.empty();
+    if (averaged) {
+        const Average& a = averages_[static_cast<size_t>(hover_)];
+        wchar_t buf[64];
+        swprintf_s(buf, L"%d-day avg %.0f/%.0f, pulse %.0f", kAverageDays, a.systolic, a.diastolic, a.pulse);
+        lines[3] = buf;
+    }
+    const float w = 190, h = averaged ? 70.0f : 54.0f;
     const float left = std::min(x + 14, bp.plot.right - w), top = bp.plot.top + 4;
     brush_->SetColor(kSurface);
     target_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(left, top, left + w, top + h), 4, 4), brush_.get());
@@ -320,6 +383,7 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
     Text(lines[0], left + 8, top + 11, bold_.get(), kInk, DWRITE_TEXT_ALIGNMENT_LEADING, w);
     Text(lines[1], left + 8, top + 27, small_.get(), kInk, DWRITE_TEXT_ALIGNMENT_LEADING, w);
     Text(lines[2], left + 8, top + 43, small_.get(), kInk, DWRITE_TEXT_ALIGNMENT_LEADING, w);
+    if (averaged) Text(lines[3], left + 8, top + 59, small_.get(), kInk2, DWRITE_TEXT_ALIGNMENT_LEADING, w);
 }
 
 void ChartWindow::OnPaint() {
@@ -346,8 +410,8 @@ void ChartWindow::OnPaint() {
                    static_cast<float>((hi + 19) / 10 * 10), visible_.front().epoch - pad, visible_.back().epoch + pad};
             pulse_ = {D2D1::RectF(kMarginL, bp_h + kPanelGap + kMarginT, size.width - kMarginR, size.height - kMarginB),
                       static_cast<float>((plo - 5) / 10 * 10), static_cast<float>(std::max((phi + 14) / 10 * 10, (plo - 5) / 10 * 10 + 20)), bp_.t0, bp_.t1};
-            const Series bp_series[2] = {{L"Systolic", kSys, &Point::systolic}, {L"Diastolic", kDia, &Point::diastolic}};
-            const Series pulse_series[1] = {{L"Pulse", kPulse, &Point::pulse}};
+            const Series bp_series[2] = {{L"Systolic", kSys, &Point::systolic, &Average::systolic}, {L"Diastolic", kDia, &Point::diastolic, &Average::diastolic}};
+            const Series pulse_series[1] = {{L"Pulse", kPulse, &Point::pulse, &Average::pulse}};
             DrawPanel(bp_, L"Blood pressure (mmHg)", bp_series, 2, true);
             DrawLegend(bp_, bp_series, 2);
             DrawPanel(pulse_, L"Pulse (bpm)", pulse_series, 1, false);
