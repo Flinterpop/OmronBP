@@ -35,6 +35,16 @@ std::vector<StoredReading> LoadReadings(const std::filesystem::path& csv);
 size_t AppendReadings(const std::filesystem::path& csv, const std::wstring& device, const std::wstring& model,
                       const std::vector<std::vector<models::Reading>>& per_user);
 
+// Of `incoming` (for one monitor and user, from a source without seconds such as the OMRON app
+// export), those not already in `existing`: a stored reading with the same monitor, user and
+// values in the same minute counts as the same measurement.  Duplicates within `incoming` are dropped too.
+std::vector<models::Reading> NewImports(const std::vector<StoredReading>& existing, const std::wstring& device, int user,
+                                        const std::vector<models::Reading>& incoming);
+
+// Appends NewImports(LoadReadings(csv), ...) to the CSV.  Returns the number written.
+size_t ImportReadings(const std::filesystem::path& csv, const std::wstring& device, const std::wstring& model, int user,
+                      const std::vector<models::Reading>& incoming);
+
 // Readings taken on or after `since_epoch` (0 = all), optionally for one nickname only.  Oldest first.
 std::vector<StoredReading> FilterReadings(const std::vector<StoredReading>& rows, int64_t since_epoch, const std::wstring& device);
 

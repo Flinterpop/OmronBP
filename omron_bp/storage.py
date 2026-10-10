@@ -37,6 +37,20 @@ def _key(device: str, user: int, reading: Reading) -> ReadingKey:
     return device, user, reading.timestamp.strftime(TIMESTAMP_FORMAT), reading.systolic, reading.diastolic, reading.pulse
 
 
+def _row(device: str, model: str, user: int, reading: Reading) -> dict[str, str | int]:
+    return {
+        "timestamp": reading.timestamp.strftime(TIMESTAMP_FORMAT),
+        "model": model,
+        "device": device,
+        "user": user,
+        "systolic": reading.systolic,
+        "diastolic": reading.diastolic,
+        "pulse": reading.pulse,
+        "movement": int(reading.movement),
+        "irregular_heartbeat": int(reading.irregular_heartbeat),
+    }
+
+
 def existing_keys(path: Path) -> set[ReadingKey]:
     """Keys of every reading already in the CSV (empty set if it does not exist)."""
     assert path.name, "path required"
@@ -76,21 +90,36 @@ def append_readings(
                 if key in seen:
                     continue
                 seen.add(key)
-                writer.writerow(
-                    {
-                        "timestamp": reading.timestamp.strftime(TIMESTAMP_FORMAT),
-                        "model": model,
-                        "device": device,
-                        "user": user,
-                        "systolic": reading.systolic,
-                        "diastolic": reading.diastolic,
-                        "pulse": reading.pulse,
-                        "movement": int(reading.movement),
-                        "irregular_heartbeat": int(reading.irregular_heartbeat),
-                    }
-                )
+                writer.writerow(_row(device, model, user, reading))
                 written += 1
     assert written >= 0
+    return written
+
+
+def import_readings(path: Path, device: str, model: str, user: int, readings: list[Reading]) -> int:
+    """Append readings from another source (the OMRON app export) for one monitor and user.
+
+    That source has no seconds, so a reading counts as already present when the same monitor,
+    user and values are stored within the same minute; re-importing a file, or importing one
+    that overlaps what was downloaded over Bluetooth, adds nothing twice.  Returns the number written.
+    """
+    assert device and model and 1 <= user <= 8
+    assert len(readings) <= MAX_CSV_ROWS
+    seen = {(d, u, stamp[:16], s, di, p) for d, u, stamp, s, di, p in existing_keys(path)}
+    is_new_file = not path.is_file()
+    written = 0
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
+        if is_new_file:
+            writer.writeheader()
+        for reading in readings:
+            key = (device, user, f"{reading.timestamp:%Y-%m-%d %H:%M}", reading.systolic, reading.diastolic, reading.pulse)
+            if key in seen:
+                continue
+            seen.add(key)
+            writer.writerow(_row(device, model, user, reading))
+            written += 1
+    assert 0 <= written <= len(readings)
     return written
 
 

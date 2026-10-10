@@ -13,3 +13,5 @@ readings_*.csv
 readings_*.pdf
 dist/
 win32/tools/icon_layers/
+# OMRON connect app exports: personal health data, like readings.csv
+Report*.csv

@@ -16,3 +16,9 @@
 #define IDC_EXPORT_PERIOD   1103
 #define IDC_EXPORT_INFO     1104
 #define IDC_EXPORT_PDF      1105
+
+#define IDD_IMPORT          103
+#define IDC_IMPORT_FILE     1201
+#define IDC_IMPORT_MONITOR  1202
+#define IDC_IMPORT_USER     1203
+#define IDC_IMPORT_INFO     1204

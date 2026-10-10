@@ -265,6 +265,36 @@ size_t AppendReadings(const std::filesystem::path& csv, const std::wstring& devi
     return written;
 }
 
+std::vector<models::Reading> NewImports(const std::vector<StoredReading>& existing, const std::wstring& device, int user,
+                                        const std::vector<models::Reading>& incoming) {
+    assert(!device.empty() && user >= 1 && user <= static_cast<int>(models::kMaxUsers));
+    assert(existing.size() <= kMaxRows && incoming.size() <= kMaxRows);
+    using MinuteKey = std::tuple<int64_t, int, int, int>;  // minute since epoch, values
+    auto key = [](const models::Reading& r) { return MinuteKey{r.when.ToEpoch() / 60, r.systolic, r.diastolic, r.pulse}; };
+    std::set<MinuteKey> seen;
+    for (const StoredReading& row : existing) {
+        if (row.device == device && row.user == user) seen.insert(key(row.reading));
+    }
+    std::vector<models::Reading> out;
+    for (const models::Reading& r : incoming) {
+        if (seen.insert(key(r)).second) out.push_back(r);
+    }
+    assert(out.size() <= incoming.size());
+    return out;
+}
+
+size_t ImportReadings(const std::filesystem::path& csv, const std::wstring& device, const std::wstring& model, int user,
+                      const std::vector<models::Reading>& incoming) {
+    assert(!model.empty() && user >= 1 && user <= static_cast<int>(models::kMaxUsers));
+    const std::vector<models::Reading> fresh = NewImports(LoadReadings(csv), device, user, incoming);
+    if (fresh.empty()) return 0;
+    std::vector<std::vector<models::Reading>> per_user(static_cast<size_t>(user));
+    per_user.back() = fresh;
+    const size_t written = AppendReadings(csv, device, model, per_user);
+    assert(written == fresh.size());
+    return written;
+}
+
 std::vector<StoredReading> FilterReadings(const std::vector<StoredReading>& rows, int64_t since_epoch, const std::wstring& device) {
     std::vector<StoredReading> out;
     for (const StoredReading& r : rows) {

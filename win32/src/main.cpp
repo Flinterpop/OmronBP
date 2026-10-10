@@ -1,6 +1,6 @@
 // OMRON blood-pressure reader: main window.
 //
-// Layout:  [Read all] [Pair...] [Open CSV] [Forget] [Export...]      [30d] [90d] [12m] [All]
+// Layout:  [Read all] [Pair...] [Open CSV] [Forget] [Export...] [Import...]   [30d] [90d] [12m] [All]
 //          monitors list | summary line
 //                        | chart (Direct2D)
 //                        | readings table
@@ -25,6 +25,8 @@
 #include "app.h"
 #include "chart.h"
 #include "export_dialog.h"
+#include "import_dialog.h"
+#include "omron_import.h"
 #include "pdf.h"
 #include "report.h"
 #include "resource.h"
@@ -78,7 +80,7 @@ using namespace omron;
 
 enum Id : int {
     kIdReadAll = 100, kIdPair, kIdOpenCsv, kIdRemove, kIdExport, kIdDevices, kIdReadings, kIdChart, kIdSummary,
-    kIdRange30, kIdRange90, kIdRange365, kIdRangeAll, kIdStatus, kIdLog, kIdVerbose, kIdSyncClock,
+    kIdRange30, kIdRange90, kIdRange365, kIdRangeAll, kIdStatus, kIdLog, kIdVerbose, kIdSyncClock, kIdImport,
 };
 
 constexpr wchar_t kClassName[] = L"OmronBPMain";
@@ -104,6 +106,23 @@ std::wstring ClockNote(const workflow::ClockStatus& c) {
     if (std::labs(c.drift_seconds) <= workflow::kClockToleranceSeconds) return L", clock OK";
     if (!c.verified) return L", clock " + std::to_wstring(std::labs(minutes)) + L" min off (layout unverified, not changed)";
     return L", clock " + std::to_wstring(std::labs(minutes)) + L" min off (sync disabled)";
+}
+
+std::optional<std::filesystem::path> PickImportFile(HWND owner, const std::filesystem::path& start_dir) {
+    assert(owner != nullptr);
+    wchar_t file[MAX_PATH] = {};
+    const std::wstring dir = start_dir.wstring();
+    OPENFILENAMEW ofn{sizeof ofn};
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"OMRON app export (*.csv)\0*.csv\0All files\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrInitialDir = dir.c_str();
+    ofn.lpstrTitle = L"Import readings exported from the OMRON app";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&ofn)) return std::nullopt;
+    assert(file[0] != L'\0');
+    return std::filesystem::path(file);
 }
 
 class MainWindow {
@@ -132,13 +151,14 @@ private:
     void PairNew();
     void RemoveSelected();
     void ExportReadings();
+    void ImportFromOmronApp();
     void DrainLog();
     void AppendLog(const std::wstring& line);
     void OnDone(bool ok);
     std::vector<uint64_t> OtherAddresses(uint64_t keep) const;
 
     HWND hwnd_ = nullptr;
-    HWND read_all_ = nullptr, pair_ = nullptr, open_csv_ = nullptr, remove_ = nullptr, export_ = nullptr;
+    HWND read_all_ = nullptr, pair_ = nullptr, open_csv_ = nullptr, remove_ = nullptr, export_ = nullptr, import_ = nullptr;
     HWND devices_ = nullptr, readings_ = nullptr, chart_ = nullptr, summary_ = nullptr;
     HWND range_[4] = {};
     HWND status_ = nullptr, log_ = nullptr, verbose_ = nullptr, sync_clock_ = nullptr;
@@ -195,7 +215,7 @@ LRESULT MainWindow::Proc(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SIZE: Layout(); return 0;
         case WM_GETMINMAXINFO: {
             auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
-            mmi->ptMinTrackSize = {app::Scale(hwnd_, 1000), app::Scale(hwnd_, 560)};
+            mmi->ptMinTrackSize = {app::Scale(hwnd_, 1140), app::Scale(hwnd_, 560)};
             return 0;
         }
         case WM_DPICHANGED: {
@@ -234,7 +254,7 @@ void MainWindow::CreateFonts() {
     if (bold_) DeleteObject(bold_);
     font_ = app::CreateUiFont(hwnd_, 10);
     bold_ = app::CreateUiFont(hwnd_, 10, true);
-    for (HWND h : {read_all_, pair_, open_csv_, remove_, export_, devices_, readings_, summary_, status_, log_, verbose_, sync_clock_, range_[0], range_[1], range_[2], range_[3]}) {
+    for (HWND h : {read_all_, pair_, open_csv_, remove_, export_, import_, devices_, readings_, summary_, status_, log_, verbose_, sync_clock_, range_[0], range_[1], range_[2], range_[3]}) {
         if (h) SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     }
     if (read_all_) SendMessageW(read_all_, WM_SETFONT, reinterpret_cast<WPARAM>(bold_), TRUE);
@@ -253,6 +273,7 @@ void MainWindow::OnCreate() {
     open_csv_ = make(L"BUTTON", L"Open readings.csv", WS_TABSTOP | BS_PUSHBUTTON, kIdOpenCsv);
     remove_ = make(L"BUTTON", L"Forget monitor", WS_TABSTOP | BS_PUSHBUTTON, kIdRemove);
     export_ = make(L"BUTTON", L"Export...", WS_TABSTOP | BS_PUSHBUTTON, kIdExport);
+    import_ = make(L"BUTTON", L"Import from OMRON app...", WS_TABSTOP | BS_PUSHBUTTON, kIdImport);
     devices_ = make(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER, kIdDevices, WS_EX_CLIENTEDGE);
     readings_ = make(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER, kIdReadings, WS_EX_CLIENTEDGE);
     summary_ = make(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS, kIdSummary);
@@ -333,6 +354,8 @@ void MainWindow::Layout() {
     place(remove_, x, y, s(110), bar_h);
     x += s(110) + gap;
     place(export_, x, y, s(90), bar_h);
+    x += s(90) + gap;
+    place(import_, x, y, s(170), bar_h);
     for (int i = 0; i < 4; ++i) place(range_[i], rc.right - pad - (4 - i) * s(72) + gap / 2, y + s(3), s(72) - gap / 2, bar_h - s(6));
     y += bar_h + pad;
 
@@ -475,7 +498,7 @@ void MainWindow::SetRange(int id) {
 
 void MainWindow::SetBusy(bool busy) {
     busy_ = busy;
-    for (HWND h : {read_all_, pair_, remove_, export_}) EnableWindow(h, !busy);
+    for (HWND h : {read_all_, pair_, remove_, export_, import_}) EnableWindow(h, !busy);
     EnableWindow(remove_, !busy && selected_ >= 0);
 }
 
@@ -673,8 +696,49 @@ void MainWindow::ExportReadings() {
     }
 }
 
+void MainWindow::ImportFromOmronApp() {
+    assert(!busy_);
+    if (devices_list_.empty()) {
+        MessageBoxW(hwnd_, L"Imported readings are added to a monitor, and none is paired yet. Click 'Pair new monitor...' first.", app::kAppTitle, MB_ICONINFORMATION);
+        return;
+    }
+    const std::optional<std::filesystem::path> picked = PickImportFile(hwnd_, paths_.csv.parent_path());
+    if (!picked) return;
+    const std::filesystem::path& path = *picked;
+    std::vector<models::Reading> incoming;
+    try {
+        incoming = omron_import::ReadExport(path);
+    } catch (const std::exception& exc) {
+        MessageBoxW(hwnd_, (L"Cannot import " + path.filename().wstring() + L":\n\n" + storage::FromUtf8(exc.what())).c_str(), app::kAppTitle, MB_ICONERROR);
+        return;
+    }
+    if (incoming.empty()) {
+        MessageBoxW(hwnd_, (path.filename().wstring() + L" holds no readings.").c_str(), app::kAppTitle, MB_ICONINFORMATION);
+        return;
+    }
+    const std::wstring about = path.filename().wstring() + L"\n" + std::to_wstring(incoming.size()) + L" readings from " + FormatDate(incoming.front().when) + L" to " +
+                               FormatDate(incoming.back().when) + L".";
+    const std::vector<storage::KnownDevice> devices = devices_list_;
+    auto fresh = [&](const import_dialog::Choice& c) { return storage::NewImports(rows_, devices[c.monitor].name, c.user, incoming).size(); };
+    const std::optional<import_dialog::Choice> choice = import_dialog::Show(hwnd_, about, devices, selected_ >= 0 ? static_cast<size_t>(selected_) : 0, fresh);
+    if (!choice) return;
+    assert(choice->monitor < devices.size());
+    const storage::KnownDevice& target = devices[choice->monitor];
+    try {
+        const size_t written = storage::ImportReadings(paths_.csv, target.name, target.model, choice->user, incoming);
+        const std::wstring message = L"Imported " + std::to_wstring(written) + L" of " + std::to_wstring(incoming.size()) + L" readings from " + path.filename().wstring() +
+                                     L" as " + target.name + L" user " + std::to_wstring(choice->user) + L".";
+        selected_ = static_cast<int>(choice->monitor);
+        LoadData();
+        SetWindowTextW(status_, message.c_str());
+        AppendLog(message);
+    } catch (const std::exception& exc) {
+        MessageBoxW(hwnd_, storage::FromUtf8(exc.what()).c_str(), app::kAppTitle, MB_ICONERROR);
+    }
+}
+
 void MainWindow::OnCommand(int id) {
-    assert(id >= kIdReadAll && id <= kIdSyncClock);
+    assert(id >= kIdReadAll && id <= kIdImport);
     assert(hwnd_ != nullptr);
     switch (id) {
         case kIdReadAll:
@@ -687,6 +751,7 @@ void MainWindow::OnCommand(int id) {
         case kIdPair: PairNew(); return;
         case kIdRemove: RemoveSelected(); return;
         case kIdExport: ExportReadings(); return;
+        case kIdImport: ImportFromOmronApp(); return;
         case kIdOpenCsv:
             if (!std::filesystem::exists(paths_.csv)) {
                 MessageBoxW(hwnd_, L"No readings have been downloaded yet.", app::kAppTitle, MB_ICONINFORMATION);

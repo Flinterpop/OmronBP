@@ -1,4 +1,4 @@
-"""Command-line interface: ``scan``, ``pair``, ``read``, ``export``, ``chart`` and ``models``."""
+"""Command-line interface: ``scan``, ``pair``, ``read``, ``import``, ``export``, ``chart`` and ``models``."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ import logging
 import sys
 import time
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from bleak.exc import BleakDeviceNotFoundError, BleakError
 
-from omron_bp import chart, pdf, reader
+from omron_bp import chart, omron_import, pdf, reader
 from omron_bp.models import ALIASES, LAYOUTS, Reading, resolve_layout
-from omron_bp.storage import KnownDevice, append_readings, export_readings, load_devices, save_device
+from omron_bp.storage import KnownDevice, append_readings, export_readings, import_readings, load_devices, save_device
 from omron_bp.transport import KEY_SIZE, ProtocolError
 
 log = logging.getLogger("omron_bp")
@@ -69,6 +69,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_read.add_argument("--address", help="... at this Bluetooth address")
     p_read.add_argument("--csv", type=Path, default=DEFAULT_CSV, help=f"output file (default {DEFAULT_CSV})")
     p_read.add_argument("--no-clock-sync", action="store_true", help="report the monitor clock drift but never correct it")
+
+    p_import = sub.add_parser("import", help="add the readings from an OMRON connect app export (CSV) to the CSV")
+    p_import.add_argument("file", type=Path, help="the exported file, e.g. 'Report (August 01, 2025 - February 02, 2026).csv'")
+    p_import.add_argument("--device", required=True, help="registered nickname the readings belong to")
+    p_import.add_argument("--user", type=int, default=1, help="user slot on that monitor (default 1)")
+    p_import.add_argument("--csv", type=Path, default=DEFAULT_CSV, help=f"output file (default {DEFAULT_CSV})")
 
     p_models = sub.add_parser("models", help="list supported models")
     assert p_models is not None
@@ -129,6 +135,25 @@ def cmd_export(args: argparse.Namespace) -> int:
         pages = pdf.write_report(pdf_path, pdf.build_report(rows, options))
         print(f"{pages}-page PDF report written to {pdf_path}")
     return 0 if count else 1
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    assert args.file is not None and args.csv is not None
+    registry = load_devices(args.devices)
+    if args.device not in registry:
+        raise SystemExit(f"'{args.device}' is not in {args.devices}; registered: {', '.join(registry) or 'none'}")
+    layout = resolve_layout(registry[args.device].model)
+    if not 1 <= args.user <= layout.user_count:
+        raise SystemExit(f"--user must be between 1 and {layout.user_count} for {layout.model}")
+    try:
+        readings = omron_import.read_export(args.file)
+    except (OSError, omron_import.OmronExportError) as exc:
+        raise SystemExit(f"cannot import {args.file}: {exc}") from exc
+    added = import_readings(args.csv, args.device, layout.model, args.user, readings)
+    assert 0 <= added <= len(readings)
+    span = f" ({readings[0].timestamp:%Y-%m-%d} to {readings[-1].timestamp:%Y-%m-%d})" if readings else ""
+    print(f"{len(readings)} readings in {args.file}{span}; {added} new appended to {args.csv} as {args.device} user {args.user}")
+    return 0
 
 
 def cmd_scan(timeout_s: float, include_all: bool) -> int:
@@ -268,17 +293,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.debug:
         logging.getLogger("bleak").setLevel(logging.WARNING)
     key = _parse_key(args.key)
-    assert args.command in {"models", "scan", "pair", "read", "chart", "export"}
-
-    if args.command == "models":
-        return cmd_models()
-    if args.command == "chart":
-        return cmd_chart(args)
-    if args.command == "export":
-        return cmd_export(args)
-    if args.command == "scan":
-        return cmd_scan(args.timeout, args.all)
-    if args.command == "pair":
-        return cmd_pair(args, key)
-    assert args.command == "read", args.command
-    return cmd_read(args, key)
+    handlers: dict[str, Callable[[], int]] = {
+        "models": cmd_models,
+        "chart": lambda: cmd_chart(args),
+        "export": lambda: cmd_export(args),
+        "import": lambda: cmd_import(args),
+        "scan": lambda: cmd_scan(args.timeout, args.all),
+        "pair": lambda: cmd_pair(args, key),
+        "read": lambda: cmd_read(args, key),
+    }
+    assert args.command in handlers, args.command
+    return handlers[args.command]()

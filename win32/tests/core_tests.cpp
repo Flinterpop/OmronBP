@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../src/models.h"
+#include "../src/omron_import.h"
 #include "../src/pdf.h"
 #include "../src/report.h"
 #include "../src/protocol.h"
@@ -396,6 +397,52 @@ void TestClockWorkflow() {
     CHECK(st.known && !st.readable && !st.corrected && io5.writes == 0);
 }
 
+void TestOmronImport() {
+    using omron_import::ParseDateTime;
+    const auto t1 = ParseDateTime("Dec 19, 2025", "10:29 PM");
+    CHECK(t1 && t1->ToString() == "2025-12-19 22:29:00");
+    CHECK(ParseDateTime("Sep 13, 2025", "12:05 AM")->hour == 0);
+    CHECK(ParseDateTime("Sep 13, 2025", "12:05 PM")->hour == 12);
+    CHECK(ParseDateTime("September 3, 2025", "18:05")->ToString() == "2025-09-03 18:05:00");
+    CHECK(!ParseDateTime("Foo 1, 2025", "6:10 AM") && !ParseDateTime("Feb 30, 2025", "6:10 AM"));
+    CHECK(!ParseDateTime("Dec 1, 2025", "13:10 PM") && !ParseDateTime("Dec 1, 2025", "6 AM"));
+
+    // The shape of a real OMRON connect export (values altered), with a BOM and quoted notes.
+    const std::string text =
+        "\xEF\xBB\xBF" "Date,Time,Systolic (mmHg),Diastolic (mmHg),Pulse (bpm),Notes\r\n"
+        "\"Dec 25, 2025\",6:10 AM,150,88,48,\r\n"
+        "\"Dec 19, 2025\",10:29 PM,152,89,56,after a walk\r\n"
+        "\"Sep 13, 2025\",12:05 AM,149,86,58,\"note, with \"\"quotes\"\"\r\nand a line break\"\r\n"
+        "\r\n";
+    const auto readings = omron_import::ParseExport(text);
+    CHECK(readings.size() == 3);
+    CHECK(readings[0].when.ToString() == "2025-09-13 00:05:00" && readings[2].systolic == 150 && readings[2].pulse == 48);
+    CHECK(!readings[1].movement && !readings[1].irregular_heartbeat);
+    const auto flags = omron_import::ParseExport("Time,Date,Systolic,Diastolic,Pulse,Irregular heartbeat,Body Movement\n"
+                                                 "6:10 AM,\"Dec 25, 2025\",150,88,48,Yes,\n7:10 AM,\"Dec 25, 2025\",140,80,50,No,1\n");
+    CHECK(flags.size() == 2 && flags[0].irregular_heartbeat && !flags[0].movement && flags[1].movement && !flags[1].irregular_heartbeat);
+    CHECK_THROWS(omron_import::ParseExport(""));
+    CHECK_THROWS(omron_import::ParseExport("timestamp,model,device\n"));
+    CHECK_THROWS(omron_import::ParseExport("Date,Time,Systolic,Diastolic,Pulse\n\"Dec 25, 2025\",6:10 AM,150,88\n"));
+    CHECK_THROWS(omron_import::ParseExport("Date,Time,Systolic,Diastolic,Pulse\n\"Dec 25, 2025\",6:10 AM,150,88,--\n"));
+
+    // Importing: idempotent, and a reading already downloaded over Bluetooth (with seconds) is not added twice.
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / L"omron_bp_import_tests";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path csv = dir / L"r.csv";
+    std::filesystem::remove(csv);
+    models::Reading bt = readings[2];
+    bt.when.second = 41;
+    CHECK(storage::AppendReadings(csv, L"ten", L"HEM-7342T", {{}, {bt}}) == 1);
+    CHECK(storage::NewImports(storage::LoadReadings(csv), L"ten", 2, readings).size() == 2);
+    CHECK(storage::ImportReadings(csv, L"ten", L"HEM-7342T", 2, readings) == 2);
+    CHECK(storage::ImportReadings(csv, L"ten", L"HEM-7342T", 2, readings) == 0);
+    CHECK(storage::ImportReadings(csv, L"ten", L"HEM-7342T", 1, readings) == 3);
+    const auto rows = storage::LoadReadings(csv);
+    CHECK(rows.size() == 6 && rows[1].user == 2 && rows[1].reading.when.ToString() == "2025-09-13 00:05:00" && rows[5].user == 1);
+    std::filesystem::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
@@ -410,6 +457,8 @@ int main() {
     std::puts("pdf ok");
     TestClockWorkflow();
     std::puts("clock workflow ok");
+    TestOmronImport();
+    std::puts("omron import ok");
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

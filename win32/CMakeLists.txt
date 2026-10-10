@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(OmronBP VERSION 0.1.6 LANGUAGES CXX)
+project(OmronBP VERSION 0.1.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +17,7 @@ add_library(omron_core STATIC
     src/storage.cpp
     src/pdf.cpp
     src/report.cpp
+    src/omron_import.cpp
 )
 target_include_directories(omron_core PUBLIC src)
 
@@ -34,6 +35,7 @@ add_executable(OmronBP WIN32
     src/chart.cpp
     src/pair_dialog.cpp
     src/export_dialog.cpp
+    src/import_dialog.cpp
     src/app.rc
     src/app.ico
     src/app.manifest
