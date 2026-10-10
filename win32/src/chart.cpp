@@ -127,6 +127,7 @@ private:
     void DrawXAxis(const Panel& p);
     void DrawLegend(const Panel& p, const Series* series, size_t count);
     void DrawHover(const Panel& bp, const Panel& pulse);
+    void DrawHoverBox(const Panel& bp, const Point& pt, float x);
     void Text(const std::wstring& text, float x, float y, IDWriteTextFormat* fmt, const D2D1_COLOR_F& color, DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING, float width = 200);
 
     HWND hwnd_;
@@ -355,6 +356,7 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
     const Point& pt = visible_[static_cast<size_t>(hover_)];
     const float x = bp.X(pt.epoch);
     assert(x >= bp.plot.left - 1 && x <= bp.plot.right + 1);
+    DrawHoverBox(bp, pt, x);  // first, so the line and dots draw on top of it
     brush_->SetColor(kInk2);
     target_->DrawLine(D2D1::Point2F(x, bp.plot.top), D2D1::Point2F(x, pulse.plot.bottom), brush_.get(), 1.0f);
     const D2D1_COLOR_F colors[3] = {kSys, kDia, kPulse};
@@ -365,6 +367,11 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
         brush_->SetColor(colors[i]);
         target_->FillEllipse(D2D1::Ellipse(centers[i], 5.5f, 5.5f), brush_.get());
     }
+}
+
+void ChartWindow::DrawHoverBox(const Panel& bp, const Point& pt, float x) {
+    assert(hover_ >= 0 && hover_ < static_cast<int>(visible_.size()));
+    assert(averages_.empty() || averages_.size() == visible_.size());
     std::wstring lines[4] = {FormatDateTime(pt.epoch), L"Systolic " + std::to_wstring(pt.systolic) + L"   Diastolic " + std::to_wstring(pt.diastolic),
                              L"Pulse " + std::to_wstring(pt.pulse) + (pt.irregular ? L"   irregular heartbeat" : L"") + (pt.movement ? L"   movement" : L""), L""};
     const bool averaged = !averages_.empty();
