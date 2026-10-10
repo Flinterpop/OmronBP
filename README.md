@@ -8,7 +8,7 @@
 
 *Last updated: 28 Sep 2026*
 
-Version 0.1.5
+Version 0.1.6
 
 Downloads stored readings from OMRON Bluetooth LE blood-pressure monitors directly to a CSV file, without the OMRON app. Runs on Windows 10/11 using the built-in Bluetooth stack.
 
@@ -186,6 +186,10 @@ The version lives in `pyproject.toml`, `omron_bp/__init__.py`, `win32/CMakeLists
 MIT - see [LICENSE](LICENSE). The wire protocol and per-model memory layouts were learned from the open-source [omblepy](https://github.com/userx14/omblepy) and [UBPM](https://codeberg.org/LazyT/ubpm) projects; this is an independent implementation that stays compatible with their pairing key. OMRON is a trademark of OMRON Healthcare; this project is not affiliated with or endorsed by them.
 
 ## Release notes
+
+### v0.1.6 — 10 Oct 2026
+
+In the app's chart, the hover box background is semi-transparent, so the readings behind it stay visible. The text and border remain solid.
 
 ### v0.1.5 — 9 Oct 2026
 

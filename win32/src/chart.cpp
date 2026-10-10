@@ -384,7 +384,7 @@ void ChartWindow::DrawHoverBox(const Panel& bp, const Point& pt, float x) {
     const float w = 190, h = averaged ? 70.0f : 54.0f;
     // Right of the line if it fits, otherwise flip to the left so the box never covers the line.
     const float left = (x + 14 + w <= bp.plot.right) ? x + 14 : std::max(x - 14 - w, bp.plot.left), top = bp.plot.top + 4;
-    brush_->SetColor(kSurface);
+    brush_->SetColor(D2D1::ColorF(kSurface.r, kSurface.g, kSurface.b, 0.8f));  // semi-transparent; text stays opaque
     target_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(left, top, left + w, top + h), 4, 4), brush_.get());
     brush_->SetColor(kAxis);
     target_->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(left, top, left + w, top + h), 4, 4), brush_.get(), 1.0f);
