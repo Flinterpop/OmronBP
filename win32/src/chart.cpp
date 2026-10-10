@@ -375,7 +375,8 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
         lines[3] = buf;
     }
     const float w = 190, h = averaged ? 70.0f : 54.0f;
-    const float left = std::min(x + 14, bp.plot.right - w), top = bp.plot.top + 4;
+    // Right of the line if it fits, otherwise flip to the left so the box never covers the line.
+    const float left = (x + 14 + w <= bp.plot.right) ? x + 14 : std::max(x - 14 - w, bp.plot.left), top = bp.plot.top + 4;
     brush_->SetColor(kSurface);
     target_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(left, top, left + w, top + h), 4, 4), brush_.get());
     brush_->SetColor(kAxis);

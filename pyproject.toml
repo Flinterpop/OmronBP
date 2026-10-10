@@ -1,6 +1,6 @@
 [project]
 name = "omron-bp"
-version = "0.1.3"
+version = "0.1.4"
 description = "Download readings from OMRON Bluetooth blood-pressure monitors"
 license = "MIT"
 requires-python = ">=3.11"
@@ -40,6 +40,12 @@ max-args = 7  # drawing primitives take coordinates, size and colour
 strict = true
 python_version = "3.11"
 warn_unreachable = true
+
+# pytest's type hints reference numpy; numpy 2.5+ stubs need 3.12 syntax. The project never uses numpy.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
