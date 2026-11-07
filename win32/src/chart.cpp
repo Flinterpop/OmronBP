@@ -380,7 +380,9 @@ void ChartWindow::DrawHoverBox(const Panel& bp, const Point& pt, float x) {
     if (averaged) {
         const Average& a = averages_[static_cast<size_t>(hover_)];
         wchar_t buf[64];
-        swprintf_s(buf, L"%d-day avg %.0f/%.0f, pulse %.0f", kAverageDays, a.systolic, a.diastolic, a.pulse);
+        // .5 rounds up, as on the HTML page; printf's %.0f may round an exact .5 to even instead.
+        const auto round_up = [](float v) { return static_cast<int>(std::floor(v + 0.5f)); };
+        swprintf_s(buf, L"%d-day avg %d/%d, pulse %d", kAverageDays, round_up(a.systolic), round_up(a.diastolic), round_up(a.pulse));
         lines[3] = buf;
     }
     const float w = show_monitor_ ? 240.0f : 190.0f, h = averaged ? 70.0f : 54.0f;

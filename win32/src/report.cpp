@@ -34,9 +34,9 @@ std::wstring Summary(const std::vector<storage::StoredReading>& rows) {
     }
     const long n = static_cast<long>(rows.size());
     assert(sys_lo <= sys_hi && dia_lo <= dia_hi && p_lo <= p_hi);
-    std::wstring text = L"Average " + std::to_wstring(sys / n) + L"/" + std::to_wstring(dia / n) + L" mmHg   (systolic " + std::to_wstring(sys_lo) + L"-" +
+    std::wstring text = L"Average " + std::to_wstring(RoundedMean(sys, n)) + L"/" + std::to_wstring(RoundedMean(dia, n)) + L" mmHg   (systolic " + std::to_wstring(sys_lo) + L"-" +
                         std::to_wstring(sys_hi) + L", diastolic " + std::to_wstring(dia_lo) + L"-" + std::to_wstring(dia_hi) + L")   pulse " +
-                        std::to_wstring(pulse / n) + L" bpm (" + std::to_wstring(p_lo) + L"-" + std::to_wstring(p_hi) + L")";
+                        std::to_wstring(RoundedMean(pulse, n)) + L" bpm (" + std::to_wstring(p_lo) + L"-" + std::to_wstring(p_hi) + L")";
     return text;
 }
 
@@ -56,6 +56,13 @@ std::wstring Flags(const std::vector<storage::StoredReading>& rows) {
 }
 
 }  // namespace
+
+long RoundedMean(long sum, long n) {
+    assert(n > 0 && sum >= 0);
+    const long mean = (2 * sum + n) / (2 * n);  // floor(sum / n + 1/2) in integers
+    assert(2 * (mean * n - sum) <= n && 2 * (sum - mean * n) < n);  // within half a unit, .5 rounded up
+    return mean;
+}
 
 pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options& options) {
     assert(!options.scope.empty() && !options.period.empty() && !options.generated.empty());

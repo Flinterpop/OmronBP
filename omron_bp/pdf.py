@@ -212,6 +212,19 @@ class ReportOptions:
     one_person: bool = False  # every reading is the same person, so user slots mean nothing to the reader
 
 
+def rounded_mean(values: list[int]) -> int:
+    """Mean rounded to the nearest whole number with .5 going up, as the HTML page's Math.round does.
+
+    Python's round() would send an exact .5 to the even number instead, so 132.5 would show as 132.
+    """
+    n = len(values)
+    assert n > 0 and all(v >= 0 for v in values)
+    total = sum(values)
+    mean = (2 * total + n) // (2 * n)
+    assert 2 * (mean * n - total) <= n and 2 * (total - mean * n) < n
+    return mean
+
+
 def _summary(rows: list[dict[str, str]]) -> list[str]:
     assert 0 < len(rows) <= MAX_ROWS
     sys_ = [int(r["systolic"]) for r in rows]
@@ -229,8 +242,8 @@ def _summary(rows: list[dict[str, str]]) -> list[str]:
         flags += f"   -   {movement} flagged movement"
     return [
         f"{n} reading{'s' if n != 1 else ''}, {rows[0]['timestamp'][:10]} to {rows[-1]['timestamp'][:10]}",
-        f"Average {sum(sys_) // n}/{sum(dia) // n} mmHg   (systolic {min(sys_)}-{max(sys_)}, diastolic {min(dia)}-{max(dia)})   "
-        f"pulse {sum(pulse) // n} bpm ({min(pulse)}-{max(pulse)})",
+        f"Average {rounded_mean(sys_)}/{rounded_mean(dia)} mmHg   (systolic {min(sys_)}-{max(sys_)}, diastolic {min(dia)}-{max(dia)})   "
+        f"pulse {rounded_mean(pulse)} bpm ({min(pulse)}-{max(pulse)})",
         flags,
     ]
 

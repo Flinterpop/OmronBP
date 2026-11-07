@@ -17,6 +17,10 @@ struct Options {
     bool one_person = false;  // every reading is the same person, so user slots mean nothing to the reader
 };
 
+// Mean of n values summing to sum, rounded to the nearest whole number with .5 going up, as the HTML page's
+// Math.round does, so the app, the PDF and the page agree on every average.
+long RoundedMean(long sum, long n);
+
 pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options& options);
 
 }  // namespace omron::report

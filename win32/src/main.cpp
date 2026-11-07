@@ -123,7 +123,7 @@ std::wstring SummaryText(const std::wstring& label, const std::vector<storage::S
     const storage::StoredReading& last = rows.back();
     const long n = static_cast<long>(rows.size());
     return label + L":  " + std::to_wstring(n) + L" readings   latest " + std::to_wstring(last.reading.systolic) + L"/" + std::to_wstring(last.reading.diastolic) + L" mmHg, " +
-           std::to_wstring(last.reading.pulse) + L" bpm on " + FormatDate(last.reading.when) + L"   average " + std::to_wstring(sys / n) + L"/" + std::to_wstring(dia / n) + L"   " +
+           std::to_wstring(last.reading.pulse) + L" bpm on " + FormatDate(last.reading.when) + L"   average " + std::to_wstring(report::RoundedMean(sys, n)) + L"/" + std::to_wstring(report::RoundedMean(dia, n)) + L"   " +
            std::to_wstring(high) + L" at or above 140/90";
 }
 

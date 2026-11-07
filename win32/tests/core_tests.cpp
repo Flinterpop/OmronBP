@@ -303,6 +303,10 @@ void TestPdf() {
     const pdf::Report rep = report::Build(rows, opt);
     CHECK(rep.rows.size() == 120 && rep.columns.size() == 6 && rep.summary.size() == 3);
     CHECK(rep.rows[0][0] == L"2026-05-01" && rep.rows[0][2] == L"120" && rep.rows[0][5] == L"irregular heartbeat");
+    // Averages round half up like the HTML page: systolic 139.5 and diastolic 84.5 here, not truncated to 139/84.
+    CHECK(rep.summary[1].rfind(L"Average 140/85 mmHg", 0) == 0 && rep.summary[1].find(L"pulse 57 bpm") != std::wstring::npos);
+    CHECK(report::RoundedMean(263, 2) == 132 && report::RoundedMean(262, 2) == 131 && report::RoundedMean(395, 3) == 132 && report::RoundedMean(394, 3) == 131);
+    CHECK(report::RoundedMean(526, 4) == 132 && report::RoundedMean(265, 2) == 133);
     const std::filesystem::path out = dir / L"report.pdf";
     const size_t pages = pdf::WriteReport(out, rep);
     CHECK(pages == 3);  // ~38 rows on page 1, ~46 on the others

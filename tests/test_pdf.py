@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from omron_bp.pdf import Column, Report, ReportOptions, build_report, text_width, write_report
+from omron_bp.pdf import Column, Report, ReportOptions, build_report, rounded_mean, text_width, write_report
 
 
 def row(day: int, sys_: int = 130, ihb: str = "0") -> dict[str, str]:
@@ -15,11 +15,21 @@ def test_text_width_matches_helvetica_metrics() -> None:
     assert text_width("ABC", 10, bold=True) > text_width("ABC", 10)
 
 
+def test_rounded_mean_rounds_half_up() -> None:
+    # The same cases as core_tests.cpp, so both languages round alike.
+    assert rounded_mean([131, 132]) == 132 and rounded_mean([131, 131]) == 131
+    assert rounded_mean([131, 132, 132]) == 132 and rounded_mean([131, 131, 132]) == 131
+    assert rounded_mean([130, 131, 132, 133]) == 132  # 131.5
+    assert rounded_mean([132, 133]) == 133  # 132.5: Python's round() would give 132
+
+
 def test_report_paginates_and_is_well_formed(tmp_path: Path) -> None:
     rows = [row(1 + i % 28, 120 + i % 40, "1" if i % 30 == 0 else "0") for i in range(120)]
     report = build_report(rows, ReportOptions("ten (OMRON HEM-7342T)", "last 180 days", "2026-09-18"))
     assert len(report.rows) == 120 and len(report.columns) == 6 and len(report.summary) == 3
     assert report.rows[0][:3] == ["2026-05-01", "07:00", "120"] and report.rows[0][5] == "irregular heartbeat"
+    # Systolic averages exactly 139.5: rounded, not truncated to 139.
+    assert report.summary[1].startswith("Average 140/85 mmHg") and "pulse 55 bpm" in report.summary[1]
     out = tmp_path / "r.pdf"
     assert write_report(out, report) == 3
     data = out.read_bytes()
