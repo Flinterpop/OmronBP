@@ -6,9 +6,9 @@
 [release-latest]: https://github.com/Flinterpop/OmronBP/releases/latest
 [license-badge]: https://img.shields.io/badge/license-MIT-green
 
-*Last updated: 6 Nov 2026*
+*Last updated: 7 Nov 2026*
 
-Version 0.1.8
+Version 0.1.9
 
 Downloads stored readings from OMRON Bluetooth LE blood-pressure monitors directly to a CSV file, without the OMRON app. Runs on Windows 10/11 using the built-in Bluetooth stack.
 
@@ -44,7 +44,7 @@ Build (Visual Studio 2026, CMake):
 cd win32
 cmake -S . -B build -A x64
 cmake --build build --config Release
-build\Release\core_tests.exe      # protocol, decoder, storage, PDF, clock-sync and import tests: 115 checks
+build\Release\core_tests.exe      # protocol, decoder, storage, PDF, clock-sync and import tests: 118 checks
 ```
 
 The exe is `win32/build/Release/OmronBP.exe`; copy it anywhere. It is written in C++20 against the raw Win32 API, with C++/WinRT for Bluetooth LE and Direct2D for the chart; the protocol, record decoding and storage code mirrors the Python modules one-to-one and is covered by `win32/tests/core_tests.cpp`.
@@ -183,7 +183,7 @@ Commands are XOR-checksummed packets split into 16-byte chunks across four write
 ## Development
 
 ```powershell
-python -m pytest                     # 74 tests
+python -m pytest                     # 75 tests
 python -m ruff check .
 python -m mypy omron_bp tests
 ```
@@ -209,6 +209,10 @@ The version lives in `pyproject.toml`, `omron_bp/__init__.py`, `win32/CMakeLists
 MIT - see [LICENSE](LICENSE). The wire protocol and per-model memory layouts were learned from the open-source [omblepy](https://github.com/userx14/omblepy) and [UBPM](https://codeberg.org/LazyT/ubpm) projects; this is an independent implementation that stays compatible with their pairing key. OMRON is a trademark of OMRON Healthcare; this project is not affiliated with or endorsed by them.
 
 ## Release notes
+
+### v0.1.9 — 7 Nov 2026
+
+Averages now round to the nearest whole number everywhere, with .5 going up, as the HTML page from `chart` already did. The app's summary line and the PDF reports (from the app and from `export`) used to drop the fraction instead, so the same readings could show 131/82 in one place and 132/82 in another. The 7-day average in the app's hover box rounds the same way.
 
 ### v0.1.8 — 6 Nov 2026
 
