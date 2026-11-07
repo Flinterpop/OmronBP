@@ -62,14 +62,18 @@ def _group(rows: list[dict[str, str]]) -> list[dict[str, object]]:
     return [groups[k] for k in sorted(groups)]
 
 
-def render(csv_path: Path, out_path: Path) -> int:
-    """Write the chart page.  Returns the number of readings plotted."""
+def render(csv_path: Path, out_path: Path, combined: bool = False) -> int:
+    """Write the chart page.  Returns the number of readings plotted.
+
+    ``combined`` opens the page with every monitor merged into one data set; the page can switch either way.
+    """
     rows = _load_rows(csv_path)
     if not rows:
         raise RuntimeError(f"{csv_path} has no readings yet - run 'read' first")
     payload = {
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "source": csv_path.name,
+        "combined": combined,
         "groups": _group(rows),
     }
     assert TEMPLATE.is_file(), TEMPLATE

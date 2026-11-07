@@ -88,6 +88,7 @@
     <button data-range="365">Last 12 months</button>
     <button data-range="all" aria-pressed="true">All</button>
     <span class="spacer"></span>
+    <button id="combineToggle" aria-pressed="false">Combine all monitors</button>
     <button id="viewToggle" aria-pressed="false">Table view</button>
   </div>
   <div id="cards"></div>
@@ -105,7 +106,16 @@ const DATA = /*__DATA__*/{};
   const AVG_RANGE = "30"; // the moving average is drawn only in this view
   const AVG_DAYS = 7; // trailing window of the moving average
   const AVG_KEYS = ["sys", "dia", "pulse"];
-  const state = { range: "all", table: false };
+  const state = { range: "all", table: false, combined: DATA.combined === true };
+
+  // Every reading as one person's data set, each remembering which monitor took it.
+  const MERGED = {
+    device: "All monitors",
+    model: [...new Set(DATA.groups.map((g) => g.model))].join(" + "),
+    user: null,
+    readings: DATA.groups.flatMap((g) => g.readings.map((r) => ({ ...r, src: g.device }))).sort((a, b) => a.t - b.t),
+  };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
   const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   const fmtTime = (t) => new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -202,7 +212,7 @@ const DATA = /*__DATA__*/{};
       if (!best || bd > 40) { cross.style.display = "none"; marks.forEach((m) => (m.style.display = "none")); tip.style.display = "none"; return; }
       cross.setAttribute("x1", x(best.t)); cross.setAttribute("x2", x(best.t)); cross.style.display = "";
       series.forEach((s, i) => { marks[i].setAttribute("cx", x(best.t)); marks[i].setAttribute("cy", y(best[s.key])); marks[i].style.display = ""; });
-      tip.innerHTML = `<b>${fmtDate(best.t)}</b> ${fmtTime(best.t)}<br>` +
+      tip.innerHTML = `<b>${fmtDate(best.t)}</b> ${fmtTime(best.t)}${best.src ? ` · ${esc(best.src)}` : ""}<br>` +
         series.map((s) => `<span class="k" style="background:${s.color}"></span>${s.label} <b>${best[s.key]}</b> ${opts.unit}` +
           (averaged ? ` <span class="avgnote">(${AVG_DAYS}-day avg ${Math.round(best.avg[s.key])})</span>` : "")).join("<br>") +
         (best.ihb ? "<br>irregular heartbeat" : "") + (best.mov ? "<br>movement" : "");
@@ -226,7 +236,7 @@ const DATA = /*__DATA__*/{};
     const inRange = all.filter((r) => r.t >= cutoff);
     const rows = state.range === AVG_RANGE ? withAverages(all, inRange) : inRange;
     const card = el("div", { class: "card" });
-    card.append(el("h2", {}, `${group.device} - user ${group.user}`), el("div", { class: "meta" }, `${group.model} · ${all.length} readings, ${fmtDate(all[0].t)} to ${fmtDate(all[all.length - 1].t)}`));
+    card.append(el("h2", {}, group.user === null ? group.device : `${group.device} - user ${group.user}`), el("div", { class: "meta" }, `${group.model} · ${all.length} readings, ${fmtDate(all[0].t)} to ${fmtDate(all[all.length - 1].t)}`));
     if (!rows.length) { card.append(el("p", { class: "flag" }, "No readings in this range.")); return card; }
     const last = rows[rows.length - 1];
     const ihb = rows.filter((r) => r.ihb).length;
@@ -236,9 +246,10 @@ const DATA = /*__DATA__*/{};
       stat("Average pulse", `${avg(rows, "pulse")}`, "bpm"),
       stat("Above 140/90", `${rows.filter((r) => r.sys >= SYS_HI || r.dia >= DIA_HI).length}`, `of ${rows.length}${ihb ? ` · ${ihb} irregular` : ""}`)));
     if (state.table) {
-      const tbl = el("table", {}, el("thead", {}, el("tr", {}, ...["Date", "Time", "Systolic", "Diastolic", "Pulse", "Flags"].map((h) => el("th", {}, h)))));
+      const merged = group.user === null;
+      const tbl = el("table", {}, el("thead", {}, el("tr", {}, ...["Date", "Time", ...(merged ? ["Monitor"] : []), "Systolic", "Diastolic", "Pulse", "Flags"].map((h) => el("th", {}, h)))));
       const body = el("tbody");
-      for (const r of [...rows].reverse()) body.append(el("tr", {}, el("td", {}, fmtDate(r.t)), el("td", {}, fmtTime(r.t)), el("td", {}, String(r.sys)), el("td", {}, String(r.dia)), el("td", {}, String(r.pulse)), el("td", {}, [r.ihb ? "irregular heartbeat" : "", r.mov ? "movement" : ""].filter(Boolean).join(", "))));
+      for (const r of [...rows].reverse()) body.append(el("tr", {}, el("td", {}, fmtDate(r.t)), el("td", {}, fmtTime(r.t)), ...(merged ? [el("td", {}, r.src)] : []), el("td", {}, String(r.sys)), el("td", {}, String(r.dia)), el("td", {}, String(r.pulse)), el("td", {}, [r.ihb ? "irregular heartbeat" : "", r.mov ? "movement" : ""].filter(Boolean).join(", "))));
       tbl.append(body); card.append(tbl); return card;
     }
     const pad = Math.max(DAY, (rows[rows.length - 1].t - rows[0].t) * 0.02);
@@ -262,7 +273,13 @@ const DATA = /*__DATA__*/{};
 
   function render() {
     const host = document.getElementById("cards");
-    host.replaceChildren(...DATA.groups.map(renderCard));
+    host.replaceChildren(...(state.combined ? [MERGED] : DATA.groups).map(renderCard));
+    const combine = document.getElementById("combineToggle");
+    combine.setAttribute("aria-pressed", String(state.combined));
+    combine.classList.toggle("hidden", DATA.groups.length < 2);
+    document.getElementById("subtitle").textContent = (state.combined
+      ? `${MERGED.readings.length} readings from all monitors, treated as one person.`
+      : `${MERGED.readings.length} readings from ${DATA.groups.length} monitor/user slot${DATA.groups.length === 1 ? "" : "s"}.`) + " Reference lines mark 140 systolic and 90 diastolic.";
     document.querySelectorAll("[data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === state.range)));
     const tv = document.getElementById("viewToggle");
     tv.setAttribute("aria-pressed", String(state.table)); tv.textContent = state.table ? "Chart view" : "Table view";
@@ -270,9 +287,8 @@ const DATA = /*__DATA__*/{};
 
   document.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => { state.range = b.dataset.range; render(); }));
   document.getElementById("viewToggle").addEventListener("click", () => { state.table = !state.table; render(); });
+  document.getElementById("combineToggle").addEventListener("click", () => { state.combined = !state.combined; render(); });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
-  const total = DATA.groups.reduce((a, g) => a + g.readings.length, 0);
-  document.getElementById("subtitle").textContent = `${total} readings from ${DATA.groups.length} monitor/user slot${DATA.groups.length === 1 ? "" : "s"}. Reference lines mark 140 systolic and 90 diastolic.`;
   document.getElementById("footer").textContent = `Generated ${DATA.generated} from ${DATA.source}. Hover a chart for values; readings are local to this file.`;
   render();
 })();

@@ -33,5 +33,8 @@ def test_report_paginates_and_is_well_formed(tmp_path: Path) -> None:
 def test_all_monitors_adds_column_and_empty_report_is_valid(tmp_path: Path) -> None:
     report = build_report([row(3)], ReportOptions("all monitors", "everything", "2026-09-18", show_monitor_column=True))
     assert [c.label for c in report.columns][2] == "Monitor" and report.rows[0][2] == "ten (user 2)"
+    options = ReportOptions("all monitors (one person)", "everything", "2026-09-18", show_monitor_column=True, one_person=True)
+    one = build_report([row(3)], options)
+    assert one.rows[0][2] == "ten"
     empty = Report("t", [], [], [Column("A", 54)], [], "f")
     assert write_report(tmp_path / "e.pdf", empty) == 1

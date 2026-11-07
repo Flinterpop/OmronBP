@@ -325,6 +325,14 @@ void TestPdf() {
     // Parentheses inside PDF string literals must be escaped with a backslash.
     CHECK(text.find("Monitor: ten \\(OMRON HEM-7342T\\)") != std::string::npos);
 
+    // All monitors: a user slot is named on each row, unless the readings are one person's.
+    report::Options all{L"all monitors", L"everything", L"2026-09-18", true};
+    const pdf::Report by_slot = report::Build(rows, all);
+    CHECK(by_slot.columns[2].label == L"Monitor" && by_slot.rows[0][2] == L"ten (user 2)");
+    all.one_person = true;
+    const pdf::Report one_person = report::Build(rows, all);
+    CHECK(one_person.columns[2].label == L"Monitor" && one_person.rows[0][2] == L"ten");
+
     // Empty report still produces one valid page.
     const pdf::Report empty = report::Build({}, opt);
     CHECK(pdf::WriteReport(dir / L"empty.pdf", empty) == 1);

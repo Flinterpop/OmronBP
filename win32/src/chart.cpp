@@ -109,7 +109,7 @@ class ChartWindow {
 public:
     explicit ChartWindow(HWND hwnd) : hwnd_(hwnd) {}
 
-    void SetData(const std::vector<storage::StoredReading>& rows);
+    void SetData(const std::vector<storage::StoredReading>& rows, bool show_monitor);
     void SetRangeDays(int days);
     void OnPaint();
     void OnSize();
@@ -140,16 +140,18 @@ private:
     std::vector<Point> visible_;
     std::vector<Average> averages_;  // one per visible_ point, or empty when not shown
     int range_days_ = 0;
+    bool show_monitor_ = false;
     int hover_ = -1;
     bool tracking_ = false;
     Panel bp_{}, pulse_{};
 };
 
-void ChartWindow::SetData(const std::vector<storage::StoredReading>& rows) {
+void ChartWindow::SetData(const std::vector<storage::StoredReading>& rows, bool show_monitor) {
+    show_monitor_ = show_monitor;
     all_.clear();
     all_.reserve(rows.size());
     for (const storage::StoredReading& r : rows) {
-        all_.push_back({r.epoch, r.reading.systolic, r.reading.diastolic, r.reading.pulse, r.reading.movement, r.reading.irregular_heartbeat});
+        all_.push_back({r.epoch, r.reading.systolic, r.reading.diastolic, r.reading.pulse, r.reading.movement, r.reading.irregular_heartbeat, r.device});
     }
     std::sort(all_.begin(), all_.end(), [](const Point& a, const Point& b) { return a.epoch < b.epoch; });
     ComputeVisible();
@@ -372,7 +374,7 @@ void ChartWindow::DrawHover(const Panel& bp, const Panel& pulse) {
 void ChartWindow::DrawHoverBox(const Panel& bp, const Point& pt, float x) {
     assert(hover_ >= 0 && hover_ < static_cast<int>(visible_.size()));
     assert(averages_.empty() || averages_.size() == visible_.size());
-    std::wstring lines[4] = {FormatDateTime(pt.epoch), L"Systolic " + std::to_wstring(pt.systolic) + L"   Diastolic " + std::to_wstring(pt.diastolic),
+    std::wstring lines[4] = {FormatDateTime(pt.epoch) + (show_monitor_ ? L"   " + pt.monitor : L""), L"Systolic " + std::to_wstring(pt.systolic) + L"   Diastolic " + std::to_wstring(pt.diastolic),
                              L"Pulse " + std::to_wstring(pt.pulse) + (pt.irregular ? L"   irregular heartbeat" : L"") + (pt.movement ? L"   movement" : L""), L""};
     const bool averaged = !averages_.empty();
     if (averaged) {
@@ -381,7 +383,7 @@ void ChartWindow::DrawHoverBox(const Panel& bp, const Point& pt, float x) {
         swprintf_s(buf, L"%d-day avg %.0f/%.0f, pulse %.0f", kAverageDays, a.systolic, a.diastolic, a.pulse);
         lines[3] = buf;
     }
-    const float w = 190, h = averaged ? 70.0f : 54.0f;
+    const float w = show_monitor_ ? 240.0f : 190.0f, h = averaged ? 70.0f : 54.0f;
     // Right of the line if it fits, otherwise flip to the left so the box never covers the line.
     const float left = (x + 14 + w <= bp.plot.right) ? x + 14 : std::max(x - 14 - w, bp.plot.left), top = bp.plot.top + 4;
     brush_->SetColor(D2D1::ColorF(kSurface.r, kSurface.g, kSurface.b, 0.8f));  // semi-transparent; text stays opaque
@@ -512,9 +514,9 @@ HWND Create(HWND parent, int id) {
                            reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(parent, GWLP_HINSTANCE)), nullptr);
 }
 
-void SetData(HWND chart, const std::vector<storage::StoredReading>& rows) {
+void SetData(HWND chart, const std::vector<storage::StoredReading>& rows, bool show_monitor) {
     assert(chart != nullptr);
-    Self(chart)->SetData(rows);
+    Self(chart)->SetData(rows, show_monitor);
 }
 
 void SetRangeDays(HWND chart, int days) {

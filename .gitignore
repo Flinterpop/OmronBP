@@ -9,6 +9,7 @@ devices.json
 readings.html
 win32/build/
 OmronBP.exe
+OmronBP.ini
 readings_*.csv
 readings_*.pdf
 dist/

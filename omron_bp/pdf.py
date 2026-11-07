@@ -209,6 +209,7 @@ class ReportOptions:
     period: str
     generated: str
     show_monitor_column: bool = False
+    one_person: bool = False  # every reading is the same person, so user slots mean nothing to the reader
 
 
 def _summary(rows: list[dict[str, str]]) -> list[str]:
@@ -249,7 +250,7 @@ def build_report(rows: list[dict[str, str]], options: ReportOptions) -> Report:
         notes = ", ".join(n for n, flag in (("irregular heartbeat", r["irregular_heartbeat"]), ("movement", r["movement"])) if flag == "1")
         cells = [when.strftime("%Y-%m-%d"), when.strftime("%H:%M")]
         if options.show_monitor_column:
-            cells.append(r["device"] + (f" (user {r['user']})" if r["user"] != "1" else ""))
+            cells.append(r["device"] + (f" (user {r['user']})" if r["user"] != "1" and not options.one_person else ""))
         cells += [r["systolic"], r["diastolic"], r["pulse"], notes]
         table.append(cells)
     assert len(table) == len(rows)

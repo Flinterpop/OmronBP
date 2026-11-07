@@ -83,6 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chart.add_argument("--csv", type=Path, default=DEFAULT_CSV, help=f"input file (default {DEFAULT_CSV})")
     p_chart.add_argument("--out", type=Path, default=DEFAULT_CHART, help=f"output page (default {DEFAULT_CHART})")
     p_chart.add_argument("--open", action="store_true", help="open the page in the default browser afterwards")
+    p_chart.add_argument("--combine", action="store_true", help="open the page with all monitors merged, as one person's readings")
 
     p_export = sub.add_parser("export", help="write a time-bounded copy of the readings to a new CSV")
     p_export.add_argument("--days", type=int, default=0, help="only readings from the last N days (default: everything)")
@@ -90,6 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--csv", type=Path, default=DEFAULT_CSV, help=f"input file (default {DEFAULT_CSV})")
     p_export.add_argument("--out", type=Path, help="output file (default: readings_<device>_<period>_<date>.csv)")
     p_export.add_argument("--pdf", action="store_true", help="also write a PDF report (summary and table) next to the CSV")
+    p_export.add_argument("--combine", action="store_true", help="all monitors are one person's: the PDF says so and omits user slots")
     return parser
 
 
@@ -104,7 +106,7 @@ def cmd_models() -> int:
 
 
 def cmd_chart(args: argparse.Namespace) -> int:
-    count = chart.render(args.csv, args.out)
+    count = chart.render(args.csv, args.out, combined=args.combine)
     print(f"{count} readings charted in {args.out}")
     if args.open:
         webbrowser.open(args.out.resolve().as_uri())
@@ -115,6 +117,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     assert args.csv is not None
     if args.days < 0 or args.days > 36500:
         raise SystemExit("--days must be between 0 and 36500")
+    if args.combine and args.device:
+        raise SystemExit("--combine covers all monitors, so it cannot be used with --device")
     since = datetime.now() - timedelta(days=args.days) if args.days else None
     out = args.out or Path(
         f"readings_{args.device or 'all'}_{'last' + str(args.days) + 'days' if args.days else 'everything'}_{datetime.now():%Y-%m-%d}.csv"
@@ -124,10 +128,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     print(f"{count} reading{'s' if count != 1 else ''} exported to {out}")
     if args.pdf:
         options = pdf.ReportOptions(
-            scope=args.device or "all monitors",
+            scope="all monitors (one person)" if args.combine else args.device or "all monitors",
             period=f"last {args.days} days" if args.days else "all stored readings",
             generated=f"{datetime.now():%Y-%m-%d}",
             show_monitor_column=args.device is None,
+            one_person=args.combine,
         )
         with out.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))

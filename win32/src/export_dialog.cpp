@@ -17,6 +17,7 @@ constexpr int kDefaultPeriod = 2;  // 90 days
 
 struct State {
     const std::wstring* selected_name = nullptr;
+    bool default_all = false;
     const std::function<size_t(const Choice&)>* count = nullptr;
     std::optional<Choice> result;
 };
@@ -55,7 +56,7 @@ INT_PTR CALLBACK Proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
             const bool have_selected = !s->selected_name->empty();
             SetDlgItemTextW(dlg, IDC_EXPORT_SELECTED, have_selected ? (L"Selected monitor (" + *s->selected_name + L")").c_str() : L"Selected monitor");
             EnableWindow(GetDlgItem(dlg, IDC_EXPORT_SELECTED), have_selected);
-            CheckRadioButton(dlg, IDC_EXPORT_SELECTED, IDC_EXPORT_ALL, have_selected ? IDC_EXPORT_SELECTED : IDC_EXPORT_ALL);
+            CheckRadioButton(dlg, IDC_EXPORT_SELECTED, IDC_EXPORT_ALL, have_selected && !s->default_all ? IDC_EXPORT_SELECTED : IDC_EXPORT_ALL);
             CheckDlgButton(dlg, IDC_EXPORT_PDF, BST_CHECKED);
             UpdatePreview(dlg);
             return TRUE;
@@ -89,10 +90,11 @@ const Period* Periods(size_t* count) {
     return kPeriods;
 }
 
-std::optional<Choice> Show(HWND owner, const std::wstring& selected_name, const std::function<size_t(const Choice&)>& count) {
+std::optional<Choice> Show(HWND owner, const std::wstring& selected_name, bool default_all, const std::function<size_t(const Choice&)>& count) {
     assert(count);
     State state;
     state.selected_name = &selected_name;
+    state.default_all = default_all;
     state.count = &count;
     DialogBoxParamW(reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(owner, GWLP_HINSTANCE)), MAKEINTRESOURCEW(IDD_EXPORT), owner, Proc, reinterpret_cast<LPARAM>(&state));
     return state.result;

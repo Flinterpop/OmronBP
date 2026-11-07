@@ -32,6 +32,9 @@ def test_render_embeds_data_and_refuses_empty(tmp_path: Path) -> None:
     assert render(path, out) == 1
     html = out.read_text(encoding="utf-8")
     assert "/*__DATA__*/" not in html and '"device":"evolv"' in html and "<title>" in html
+    assert '"combined":false' in html
+    render(path, out, combined=True)
+    assert '"combined":true' in out.read_text(encoding="utf-8")
     empty = tmp_path / "empty.csv"
     empty.write_text(",".join(CSV_COLUMNS) + "\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="no readings"):

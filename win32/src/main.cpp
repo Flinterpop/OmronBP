@@ -1,7 +1,8 @@
 // OMRON blood-pressure reader: main window.
 //
 // Layout:  [Read all] [Pair...] [Open CSV] [Forget] [Export...] [Import...]   [30d] [90d] [12m] [All]
-//          monitors list | summary line
+//          [combine all]  | summary line
+//          monitors list |
 //                        | chart (Direct2D)
 //                        | readings table
 //          status line                       [clock sync] [Bluetooth details]
@@ -80,12 +81,13 @@ using namespace omron;
 
 enum Id : int {
     kIdReadAll = 100, kIdPair, kIdOpenCsv, kIdRemove, kIdExport, kIdDevices, kIdReadings, kIdChart, kIdSummary,
-    kIdRange30, kIdRange90, kIdRange365, kIdRangeAll, kIdStatus, kIdLog, kIdVerbose, kIdSyncClock, kIdImport,
+    kIdRange30, kIdRange90, kIdRange365, kIdRangeAll, kIdStatus, kIdLog, kIdVerbose, kIdSyncClock, kIdImport, kIdCombine,
 };
 
 constexpr wchar_t kClassName[] = L"OmronBPMain";
 constexpr size_t kMaxListRows = 5000;
 constexpr int kLogLimitChars = 200000;
+constexpr int kColMonitor = 2, kColUser = 3, kColNotes = 7;  // readings table columns that the code refers to
 
 std::wstring FormatDate(const models::Timestamp& t) {
     wchar_t buf[16];
@@ -106,6 +108,23 @@ std::wstring ClockNote(const workflow::ClockStatus& c) {
     if (std::labs(c.drift_seconds) <= workflow::kClockToleranceSeconds) return L", clock OK";
     if (!c.verified) return L", clock " + std::to_wstring(std::labs(minutes)) + L" min off (layout unverified, not changed)";
     return L", clock " + std::to_wstring(std::labs(minutes)) + L" min off (sync disabled)";
+}
+
+// The line above the chart: count, latest, average and high readings. rows are sorted oldest first.
+std::wstring SummaryText(const std::wstring& label, const std::vector<storage::StoredReading>& rows) {
+    assert(!label.empty() && rows.size() <= storage::kMaxRows);
+    if (rows.empty()) return label + L": no readings yet";
+    long sys = 0, dia = 0;
+    int high = 0;
+    for (const storage::StoredReading& r : rows) {
+        sys += r.reading.systolic, dia += r.reading.diastolic;
+        if (r.reading.systolic >= 140 || r.reading.diastolic >= 90) ++high;
+    }
+    const storage::StoredReading& last = rows.back();
+    const long n = static_cast<long>(rows.size());
+    return label + L":  " + std::to_wstring(n) + L" readings   latest " + std::to_wstring(last.reading.systolic) + L"/" + std::to_wstring(last.reading.diastolic) + L" mmHg, " +
+           std::to_wstring(last.reading.pulse) + L" bpm on " + FormatDate(last.reading.when) + L"   average " + std::to_wstring(sys / n) + L"/" + std::to_wstring(dia / n) + L"   " +
+           std::to_wstring(high) + L" at or above 140/90";
 }
 
 std::optional<std::filesystem::path> PickImportFile(HWND owner, const std::filesystem::path& start_dir) {
@@ -145,6 +164,8 @@ private:
     void RefreshSelected();
     void RefreshReadingsTable(const std::vector<storage::StoredReading>& rows);
     void SetRange(int id);
+    void LoadSettings();
+    void OnCombineToggled();
     void SetBusy(bool busy);
     void StartWorker(std::function<bool()> job);
     void ReadMonitors(std::vector<storage::KnownDevice> targets);
@@ -159,12 +180,14 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND read_all_ = nullptr, pair_ = nullptr, open_csv_ = nullptr, remove_ = nullptr, export_ = nullptr, import_ = nullptr;
-    HWND devices_ = nullptr, readings_ = nullptr, chart_ = nullptr, summary_ = nullptr;
+    HWND devices_ = nullptr, readings_ = nullptr, chart_ = nullptr, summary_ = nullptr, combine_ = nullptr;
     HWND range_[4] = {};
     HWND status_ = nullptr, log_ = nullptr, verbose_ = nullptr, sync_clock_ = nullptr;
     HFONT font_ = nullptr, bold_ = nullptr;
 
     workflow::Paths paths_;
+    std::filesystem::path settings_;
+    bool combined_ = false;  // all readings are one person's: the view ignores which monitor took them
     std::vector<storage::KnownDevice> devices_list_;
     std::vector<storage::StoredReading> rows_;
     int selected_ = -1;
@@ -254,7 +277,7 @@ void MainWindow::CreateFonts() {
     if (bold_) DeleteObject(bold_);
     font_ = app::CreateUiFont(hwnd_, 10);
     bold_ = app::CreateUiFont(hwnd_, 10, true);
-    for (HWND h : {read_all_, pair_, open_csv_, remove_, export_, import_, devices_, readings_, summary_, status_, log_, verbose_, sync_clock_, range_[0], range_[1], range_[2], range_[3]}) {
+    for (HWND h : {read_all_, pair_, open_csv_, remove_, export_, import_, combine_, devices_, readings_, summary_, status_, log_, verbose_, sync_clock_, range_[0], range_[1], range_[2], range_[3]}) {
         if (h) SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     }
     if (read_all_) SendMessageW(read_all_, WM_SETFONT, reinterpret_cast<WPARAM>(bold_), TRUE);
@@ -274,6 +297,7 @@ void MainWindow::OnCreate() {
     remove_ = make(L"BUTTON", L"Forget monitor", WS_TABSTOP | BS_PUSHBUTTON, kIdRemove);
     export_ = make(L"BUTTON", L"Export...", WS_TABSTOP | BS_PUSHBUTTON, kIdExport);
     import_ = make(L"BUTTON", L"Import from OMRON app...", WS_TABSTOP | BS_PUSHBUTTON, kIdImport);
+    combine_ = make(L"BUTTON", L"Combine all monitors (one person's readings)", WS_TABSTOP | BS_AUTOCHECKBOX, kIdCombine);
     devices_ = make(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER, kIdDevices, WS_EX_CLIENTEDGE);
     readings_ = make(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER, kIdReadings, WS_EX_CLIENTEDGE);
     summary_ = make(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS, kIdSummary);
@@ -299,6 +323,8 @@ void MainWindow::OnCreate() {
     assert(!dir.empty());
     paths_.csv = dir / L"readings.csv";
     paths_.devices = dir / L"devices.json";
+    settings_ = dir / L"OmronBP.ini";
+    LoadSettings();
 
     CreateFonts();
     LoadData();
@@ -323,12 +349,13 @@ void MainWindow::CreateColumns() {
     column(devices_, 3, L"Latest", 140);
     column(readings_, 0, L"Date", 84);
     column(readings_, 1, L"Time", 50);
-    column(readings_, 2, L"User", 42, LVCFMT_RIGHT);
-    column(readings_, 3, L"Systolic", 60, LVCFMT_RIGHT);
-    column(readings_, 4, L"Diastolic", 62, LVCFMT_RIGHT);
-    column(readings_, 5, L"Pulse", 48, LVCFMT_RIGHT);
-    column(readings_, 6, L"Notes", 170);
-    assert(Header_GetItemCount(ListView_GetHeader(devices_)) == 4 && Header_GetItemCount(ListView_GetHeader(readings_)) == 7);
+    column(readings_, kColMonitor, L"Monitor", 0);  // Layout() sizes this and User for the current view
+    column(readings_, kColUser, L"User", 0, LVCFMT_RIGHT);
+    column(readings_, 4, L"Systolic", 60, LVCFMT_RIGHT);
+    column(readings_, 5, L"Diastolic", 62, LVCFMT_RIGHT);
+    column(readings_, 6, L"Pulse", 48, LVCFMT_RIGHT);
+    column(readings_, kColNotes, L"Notes", 170);
+    assert(Header_GetItemCount(ListView_GetHeader(devices_)) == 4 && Header_GetItemCount(ListView_GetHeader(readings_)) == kColNotes + 1);
 }
 
 void MainWindow::Layout() {
@@ -339,7 +366,7 @@ void MainWindow::Layout() {
     int y = pad;
     int x = pad;
     assert(rc.right > 0 && rc.bottom > 0);
-    HDWP dwp = BeginDeferWindowPos(16);
+    HDWP dwp = BeginDeferWindowPos(19);
     assert(dwp != nullptr);
     auto place = [&](HWND h, int px, int py, int w, int hgt) {
         assert(h != nullptr && w >= 0 && hgt >= 0);
@@ -360,7 +387,8 @@ void MainWindow::Layout() {
     y += bar_h + pad;
 
     const int bottom = rc.bottom - pad - log_h - gap - status_h - gap;
-    place(devices_, pad, y, left_w, bottom - y);
+    place(combine_, pad, y, left_w, range_h);
+    place(devices_, pad, y + range_h + gap, left_w, bottom - (y + range_h + gap));
 
     const int rx = pad + left_w + pad, rw = rc.right - pad - rx;
     place(summary_, rx, y, rw, range_h);
@@ -375,7 +403,10 @@ void MainWindow::Layout() {
     place(log_, pad, bottom + gap + status_h + gap, rc.right - 2 * pad, log_h);
     if (dwp != nullptr) EndDeferWindowPos(dwp);
     ListView_SetColumnWidth(devices_, 3, LVSCW_AUTOSIZE_USEHEADER);
-    ListView_SetColumnWidth(readings_, 6, LVSCW_AUTOSIZE_USEHEADER);
+    // One view names the monitor on each row, the other the user slot; a zero-width column is hidden.
+    ListView_SetColumnWidth(readings_, kColMonitor, combined_ ? s(70) : 0);
+    ListView_SetColumnWidth(readings_, kColUser, combined_ ? 0 : s(42));
+    ListView_SetColumnWidth(readings_, kColNotes, LVSCW_AUTOSIZE_USEHEADER);
     // Children that shrank leave stale pixels behind; repaint everything once per layout.
     RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
@@ -434,33 +465,22 @@ void MainWindow::RefreshSelected() {
     assert(selected_ >= -1 && selected_ < static_cast<int>(devices_list_.size()));
     std::vector<storage::StoredReading> rows;
     std::wstring summary;
-    if (selected_ >= 0 && selected_ < static_cast<int>(devices_list_.size())) {
+    if (combined_) {
+        rows = rows_;  // already sorted by time; includes readings from monitors since forgotten
+        summary = SummaryText(L"All monitors", rows);
+    } else if (selected_ >= 0 && selected_ < static_cast<int>(devices_list_.size())) {
         const storage::KnownDevice& d = devices_list_[static_cast<size_t>(selected_)];
         for (const storage::StoredReading& r : rows_) {
             if (r.device == d.name) rows.push_back(r);
         }
-        if (rows.empty()) {
-            summary = d.name + L": no readings yet";
-        } else {
-            long sys = 0, dia = 0;
-            int high = 0;
-            for (const storage::StoredReading& r : rows) {
-                sys += r.reading.systolic, dia += r.reading.diastolic;
-                if (r.reading.systolic >= 140 || r.reading.diastolic >= 90) ++high;
-            }
-            const storage::StoredReading& last = rows.back();
-            summary = d.name + L":  " + std::to_wstring(rows.size()) + L" readings   latest " + std::to_wstring(last.reading.systolic) + L"/" +
-                      std::to_wstring(last.reading.diastolic) + L" mmHg, " + std::to_wstring(last.reading.pulse) + L" bpm on " + FormatDate(last.reading.when) +
-                      L"   average " + std::to_wstring(sys / static_cast<long>(rows.size())) + L"/" + std::to_wstring(dia / static_cast<long>(rows.size())) +
-                      L"   " + std::to_wstring(high) + L" at or above 140/90";
-        }
+        summary = SummaryText(d.name, rows);
     } else {
         summary = devices_list_.empty() ? L"No monitors paired yet." : L"Select a monitor.";
     }
     assert(!summary.empty());
     SetWindowTextW(summary_, summary.c_str());
     EnableWindow(remove_, selected_ >= 0 && !busy_);
-    chart::SetData(chart_, rows);
+    chart::SetData(chart_, rows, combined_);
     RefreshReadingsTable(rows);
 }
 
@@ -478,14 +498,15 @@ void MainWindow::RefreshReadingsTable(const std::vector<storage::StoredReading>&
         ListView_InsertItem(readings_, &item);
         auto set = [&](int col, const std::wstring& text) { ListView_SetItemText(readings_, item.iItem, col, const_cast<wchar_t*>(text.c_str())); };
         set(1, time);
-        set(2, std::to_wstring(r.user));
-        set(3, std::to_wstring(r.reading.systolic));
-        set(4, std::to_wstring(r.reading.diastolic));
-        set(5, std::to_wstring(r.reading.pulse));
+        set(kColMonitor, r.device);
+        set(kColUser, std::to_wstring(r.user));
+        set(4, std::to_wstring(r.reading.systolic));
+        set(5, std::to_wstring(r.reading.diastolic));
+        set(6, std::to_wstring(r.reading.pulse));
         std::wstring notes;
         if (r.reading.irregular_heartbeat) notes = L"irregular heartbeat";
         if (r.reading.movement) notes += notes.empty() ? L"movement" : L", movement";
-        set(6, notes);
+        set(kColNotes, notes);
     }
     SendMessageW(readings_, WM_SETREDRAW, TRUE, 0);
 }
@@ -494,6 +515,22 @@ void MainWindow::SetRange(int id) {
     range_id_ = id;
     const int days = id == kIdRange30 ? 30 : id == kIdRange90 ? 90 : id == kIdRange365 ? 365 : 0;
     chart::SetRangeDays(chart_, days);
+}
+
+void MainWindow::LoadSettings() {
+    assert(!settings_.empty() && combine_ != nullptr);
+    combined_ = GetPrivateProfileIntW(L"View", L"CombineMonitors", 0, settings_.c_str()) != 0;
+    Button_SetCheck(combine_, combined_ ? BST_CHECKED : BST_UNCHECKED);
+}
+
+void MainWindow::OnCombineToggled() {
+    assert(!settings_.empty() && combine_ != nullptr);
+    combined_ = Button_GetCheck(combine_) == BST_CHECKED;
+    Layout();  // the table swaps its User column for a Monitor column
+    RefreshSelected();
+    if (!WritePrivateProfileStringW(L"View", L"CombineMonitors", combined_ ? L"1" : L"0", settings_.c_str())) {
+        SetWindowTextW(status_, (L"Could not save this choice to " + settings_.wstring() + L"; it applies until the app closes.").c_str());
+    }
 }
 
 void MainWindow::SetBusy(bool busy) {
@@ -652,7 +689,7 @@ void MainWindow::ExportReadings() {
         const int64_t since = c.days == 0 ? 0 : now.ToEpoch() - static_cast<int64_t>(c.days) * 86400;
         return storage::FilterReadings(rows_, since, c.all_monitors ? L"" : selected);
     };
-    const std::optional<export_dialog::Choice> choice = export_dialog::Show(hwnd_, selected, [&](const export_dialog::Choice& c) { return filtered(c).size(); });
+    const std::optional<export_dialog::Choice> choice = export_dialog::Show(hwnd_, selected, combined_, [&](const export_dialog::Choice& c) { return filtered(c).size(); });
     if (!choice) return;
     const std::vector<storage::StoredReading> rows = filtered(*choice);
     assert(!rows.empty());
@@ -681,7 +718,8 @@ void MainWindow::ExportReadings() {
         if (choice->pdf) {
             report::Options options;
             const storage::KnownDevice* dev = selected_ >= 0 ? &devices_list_[static_cast<size_t>(selected_)] : nullptr;
-            options.scope = choice->all_monitors ? L"all monitors" : selected + (dev ? L" (OMRON " + dev->model + L")" : L"");
+            options.one_person = choice->all_monitors && combined_;
+            options.scope = options.one_person ? L"all monitors (one person)" : choice->all_monitors ? L"all monitors" : selected + (dev ? L" (OMRON " + dev->model + L")" : L"");
             options.period = choice->days ? L"last " + std::to_wstring(choice->days) + L" days" : L"all stored readings";
             options.generated = date;
             options.show_monitor_column = choice->all_monitors;
@@ -738,7 +776,7 @@ void MainWindow::ImportFromOmronApp() {
 }
 
 void MainWindow::OnCommand(int id) {
-    assert(id >= kIdReadAll && id <= kIdImport);
+    assert(id >= kIdReadAll && id <= kIdCombine);
     assert(hwnd_ != nullptr);
     switch (id) {
         case kIdReadAll:
@@ -752,6 +790,7 @@ void MainWindow::OnCommand(int id) {
         case kIdRemove: RemoveSelected(); return;
         case kIdExport: ExportReadings(); return;
         case kIdImport: ImportFromOmronApp(); return;
+        case kIdCombine: OnCombineToggled(); return;
         case kIdOpenCsv:
             if (!std::filesystem::exists(paths_.csv)) {
                 MessageBoxW(hwnd_, L"No readings have been downloaded yet.", app::kAppTitle, MB_ICONINFORMATION);

@@ -15,8 +15,9 @@ struct Choice {
     bool pdf = true;  // also write a PDF report next to the CSV
 };
 
-// `count` previews how many readings a choice covers.  Returns nullopt if cancelled.
-std::optional<Choice> Show(HWND owner, const std::wstring& selected_name, const std::function<size_t(const Choice&)>& count);
+// `count` previews how many readings a choice covers.  `default_all` starts on "All monitors".
+// Returns nullopt if cancelled.
+std::optional<Choice> Show(HWND owner, const std::wstring& selected_name, bool default_all, const std::function<size_t(const Choice&)>& count);
 
 // Period presets shown in the dialog, in order.
 struct Period {

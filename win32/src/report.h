@@ -14,6 +14,7 @@ struct Options {
     std::wstring period;     // e.g. "last 90 days (2026-06-20 to 2026-09-18)"
     std::wstring generated;  // "2026-09-18"
     bool show_monitor_column = false;
+    bool one_person = false;  // every reading is the same person, so user slots mean nothing to the reader
 };
 
 pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options& options);

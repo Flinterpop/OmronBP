@@ -79,7 +79,7 @@ pdf::Report Build(const std::vector<storage::StoredReading>& rows, const Options
         if (s.reading.irregular_heartbeat) notes = L"irregular heartbeat";
         if (s.reading.movement) notes += notes.empty() ? L"movement" : L", movement";
         std::vector<std::wstring> cells{Date(s.reading.when), Time(s.reading.when)};
-        if (options.show_monitor_column) cells.push_back(s.device + (s.user > 1 ? L" (user " + std::to_wstring(s.user) + L")" : L""));
+        if (options.show_monitor_column) cells.push_back(s.device + (s.user > 1 && !options.one_person ? L" (user " + std::to_wstring(s.user) + L")" : L""));
         cells.push_back(std::to_wstring(s.reading.systolic));
         cells.push_back(std::to_wstring(s.reading.diastolic));
         cells.push_back(std::to_wstring(s.reading.pulse));
