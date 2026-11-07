@@ -65,6 +65,16 @@ Copy-Item (Join-Path $root 'LICENSE') $stage
 $zip = "$stage.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path "$stage\*" -DestinationPath $zip
+# Windows PowerShell 5.1's Compress-Archive names entries with BACKSLASHES; the
+# zip format says '/'. PowerShell 7 (pwsh) writes '/'. Refuse rather than ship one.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zr = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+try { $sepBad = @($zr.Entries | Where-Object { $_.FullName.Contains('\') }).Count }
+finally { $zr.Dispose() }
+if ($sepBad -gt 0) {
+    Remove-Item $zip -Force
+    throw "$sepBad zip entries use '\' as the separator -- run this script under pwsh (PowerShell 7), not powershell.exe"
+}
 Write-Host "Artifact contents:" -ForegroundColor Cyan
 Get-ChildItem $stage | ForEach-Object { "  $($_.Name)  $($_.Length) bytes" }
 Write-Host "Wrote $zip" -ForegroundColor Green
